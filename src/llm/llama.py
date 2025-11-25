@@ -41,9 +41,10 @@ class LlamaLLM(LLM):
             num_return_sequences=1,
             eos_token_id=self.tokenizer.eos_token_id,
             pad_token_id=self.tokenizer.eos_token_id,
+            return_full_text=False,
         )
         text = outputs[0]["generated_text"]
-        completion = text[len(prompt) :]
+        completion = text
 
         if stop:
             for token in stop:
