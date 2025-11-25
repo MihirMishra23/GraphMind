@@ -8,14 +8,17 @@ import sys
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
+import torch
+
 # Make src/ available for imports when running as a script.
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 SRC_PATH = PROJECT_ROOT / "src"
 if str(SRC_PATH) not in sys.path:
     sys.path.insert(0, str(SRC_PATH))
 
-from agent import BaseAgent, WalkthroughAgent  # type: ignore
+from agent import BaseAgent, LLMAgent, WalkthroughAgent  # type: ignore
 from memory import NullMemory  # type: ignore
+from llm import LlamaLLM  # type: ignore
 
 try:
     from jericho import FrotzEnv
@@ -25,10 +28,35 @@ except ImportError as exc:  # pragma: no cover - environment dependency
     ) from exc
 
 
-def build_agent(name: str, memory: Optional[object]) -> BaseAgent:
+def build_agent(name: str, memory: Optional[object], args: argparse.Namespace) -> BaseAgent:
     if name == "walkthrough":
         return WalkthroughAgent(memory=memory)
+    if name == "llm":
+        device_map = resolve_device_map(args.device_map)
+        llm_client = LlamaLLM(
+            model_id=args.model_id,
+            device_map=device_map,
+            torch_dtype=args.torch_dtype,
+        )
+        return LLMAgent(
+            llm=llm_client,
+            memory=memory,
+            max_tokens=args.llm_max_tokens,
+            temperature=args.llm_temperature,
+        )
     raise ValueError(f"Unsupported agent type: {name}")
+
+
+def resolve_device_map(requested: str) -> str:
+    """Pick device map with priority: cuda > mps > cpu, unless explicitly set."""
+    req = requested.lower()
+    if req != "auto":
+        return requested
+    if torch.cuda.is_available():
+        return "cuda"
+    if torch.backends.mps.is_available():
+        return "mps"
+    return "cpu"
 
 
 def run_episode(
@@ -90,7 +118,7 @@ def parse_args() -> argparse.Namespace:
         default=Path("data/jericho/z-machine-games-master/jericho-game-suite/zork1.z5"),
         help="Path to the .z machine file",
     )
-    parser.add_argument("--agent", type=str, default="walkthrough", help="Agent type (walkthrough)")
+    parser.add_argument("--agent", type=str, default="walkthrough", help="Agent type (walkthrough|llm)")
     parser.add_argument("--max-steps", type=int, default=400, help="Maximum steps to execute")
     parser.add_argument("--seed", type=int, default=None, help="Random seed for Jericho env")
     parser.add_argument("--text-log", type=Path, default=None, help="Optional plain-text trajectory log path")
@@ -98,6 +126,26 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--quiet", action="store_true", help="Suppress stdout step printing (still logs if paths provided)"
     )
+    parser.add_argument(
+        "--model-id",
+        type=str,
+        default="meta-llama/Llama-3.2-3B-Instruct",
+        help="Hugging Face model id for the LLM agent",
+    )
+    parser.add_argument(
+        "--device-map",
+        type=str,
+        default="auto",
+        help="Device map for HF model loading (auto|cuda|mps|cpu; auto prefers cuda>mps>cpu)",
+    )
+    parser.add_argument(
+        "--torch-dtype",
+        type=str,
+        default="auto",
+        help="Torch dtype for HF model loading (e.g., float16, bfloat16, auto)",
+    )
+    parser.add_argument("--llm-max-tokens", type=int, default=32, help="Max new tokens for LLM action generation")
+    parser.add_argument("--llm-temperature", type=float, default=0.5, help="Sampling temperature for LLM agent")
     return parser.parse_args()
 
 
@@ -106,7 +154,7 @@ def main() -> None:
 
     env = FrotzEnv(str(args.game), seed=args.seed)
     memory = NullMemory()
-    agent = build_agent(args.agent, memory=memory)
+    agent = build_agent(args.agent, memory=memory, args=args)
 
     trajectory = run_episode(env, agent, memory, max_steps=args.max_steps, verbose=not args.quiet)
     save_logs(args.text_log, args.json_log, trajectory)
