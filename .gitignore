@@ -1,1 +1,3 @@
-data/jericho/*
+data/jericho/
+
+__pycache__/
