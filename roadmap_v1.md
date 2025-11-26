@@ -1,4 +1,18 @@
-# GraphMind Roadmap Post-v0
+# GraphMind Roadmap
+
+## Overview
+GraphMind augments LLM agents with a property-graph memory and an RL-guided policy to decide when and how to write/update/delete information. v0 targets Jericho text games with LLaMA-based extraction and open-vocab relations; storage and latency are not yet optimized.
+
+## Scope & Assumptions
+- Focus on Jericho text games only for v0; add other benchmarks later.
+- Property graph with open-vocab relations; keep provenance and validity intervals; no compaction yet.
+- LLM-based IE (LLaMA) to extract entities/relations/events; no budget constraints.
+- Preferences can be inferred from actions/observations; explicit user statements rare.
+
+## Minimal Property Graph Schema
+- **Nodes**: `Entity` (id, type guess, aliases, embedding, confidence), `Event` (type, participants, time, text_span), `Preference` (user_id, slot, value, validity [t_start, t_end)).
+- **Edges**: typed open-vocab `REL` with raw `rel_label`, `rel_embedding`, `rel_cluster_id` (simple online clustering), `confidence`, `source_turn`, `valid_from`, `valid_to` (None=active), `provenance` (model, prompt), `evidence_count`.
+- **System edges**: `alias_of`, `temporal_next` for hygiene. No hard deletes; close intervals or mark contradicted.
 
 ## 1) Memory Graph Implementation
 - Implement `memory/graph_store.py`: property graph objects (Node/Edge), validity intervals (`valid_from`, `valid_to`), provenance, confidence, evidence_count, alias_of edges, open-vocab rel labels + embedding slot + rel_cluster_id.
