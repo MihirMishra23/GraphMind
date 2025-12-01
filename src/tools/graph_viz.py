@@ -46,11 +46,13 @@ def export_graphviz(
 
     dot_lines.append("}")
     dot_path = dot_path.resolve()
+    dot_path.parent.mkdir(parents=True, exist_ok=True)
     dot_path.write_text("\n".join(dot_lines))
 
     if render_png:
         dot_bin = shutil.which("dot")
         output_path = png_path or dot_path.with_suffix(".png")
         if dot_bin:
+            Path(output_path).parent.mkdir(parents=True, exist_ok=True)
             subprocess.run([dot_bin, "-Tpng", str(dot_path), "-o", str(output_path)], check=False)
     return dot_path
