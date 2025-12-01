@@ -1,0 +1,430 @@
+"""Extraction and grounding utilities for Jericho observations."""
+from __future__ import annotations
+
+import json
+import re
+from dataclasses import dataclass, field
+from typing import Any, Dict, List, Optional
+
+from .graph_store import GraphStore
+
+
+@dataclass
+class ExtractedEntity:
+    name: str
+    type: Optional[str] = None
+    aliases: List[str] = field(default_factory=list)
+    properties: Dict[str, Any] = field(default_factory=dict)
+    embedding: Optional[List[float]] = None
+    confidence: float = 1.0
+    time: Optional[int] = None
+
+
+@dataclass
+class ExtractedRelation:
+    source: str
+    target: str
+    rel_label: str
+    evidence: Optional[str] = None
+    confidence: float = 1.0
+    time: Optional[int] = None
+
+
+@dataclass
+class ExtractedEvent:
+    description: str
+    participants: List[str] = field(default_factory=list)
+    properties: Dict[str, Any] = field(default_factory=dict)
+    confidence: float = 1.0
+    time: Optional[int] = None
+
+
+@dataclass
+class ExtractedPreference:
+    actor: str = "player"
+    slot: str = "goal"
+    value: str = ""
+    evidence: Optional[str] = None
+    confidence: float = 0.5
+    time: Optional[int] = None
+
+
+@dataclass
+class ExtractionResult:
+    entities: List[ExtractedEntity] = field(default_factory=list)
+    relations: List[ExtractedRelation] = field(default_factory=list)
+    events: List[ExtractedEvent] = field(default_factory=list)
+    preferences: List[ExtractedPreference] = field(default_factory=list)
+
+
+EXTRACTION_PROMPT_HEADER = """You are an information extractor for parser-based games (Jericho).
+Read the recent action/observation pair and emit concise JSON capturing entities, relations,
+events, and player preferences. Prefer open-vocabulary labels over schemas.
+
+Schema:
+- entities: name, type (location/object/person/etc), aliases, properties, confidence [0-1], time (turn id)
+- relations: source, target, rel_label, evidence (short span), confidence [0-1], time
+- events: description, participants (entity names), properties (tense/status), confidence, time
+- preferences: actor (player or NPC), slot (goal/plan/risk), value, evidence, confidence, time
+
+Rules:
+- Only include facts grounded in the text; no speculation.
+- Capture implicit preferences (e.g., 'you are hungry' -> slot: need, value: food).
+- Keep names short and stable; reuse earlier entity strings when possible.
+- Output pure JSON with keys: entities, relations, events, preferences."""
+
+FEW_SHOT_EXAMPLES = """
+Example 1:
+History: ["look -> You are in the kitchen. A dusty table stands here.", "get lamp -> Taken."]
+Observation: "A closed wooden door leads north. You feel hungry."
+Output:
+{
+  "entities": [
+    {"name": "kitchen", "type": "location", "aliases": ["kitchen"], "confidence": 0.74},
+    {"name": "wooden door", "type": "object", "aliases": ["door"], "confidence": 0.62}
+  ],
+  "relations": [
+    {"source": "kitchen", "target": "wooden door", "rel_label": "connects_north", "confidence": 0.55}
+  ],
+  "events": [],
+  "preferences": [
+    {"actor": "player", "slot": "need", "value": "find food soon", "evidence": "You feel hungry.", "confidence": 0.58}
+  ]
+}
+
+Example 2:
+History: ["open mailbox -> The mailbox contains a leaflet.", "read leaflet -> The leaflet says the grue hates light."]
+Observation: "A brass lamp lies here, unlit."
+Output:
+{
+  "entities": [
+    {"name": "brass lamp", "type": "object", "aliases": ["lamp"], "confidence": 0.78}
+  ],
+  "relations": [
+    {"source": "brass lamp", "target": "light source", "rel_label": "can_emit", "confidence": 0.51}
+  ],
+  "events": [
+    {"description": "lamp currently unlit", "participants": ["brass lamp"], "properties": {"state": "off"}, "confidence": 0.64}
+  ],
+  "preferences": [
+    {"actor": "player", "slot": "plan", "value": "light lamp to avoid grue", "evidence": "grue hates light", "confidence": 0.57}
+  ]
+}
+"""
+
+
+def build_extraction_prompt(observation: str, recent_history: Optional[List[str]] = None) -> str:
+    """Construct a few-shot prompt for the LLaMA IE model."""
+    history_text = "\n".join(recent_history or [])
+    return (
+        f"{EXTRACTION_PROMPT_HEADER}\n\n"
+        f"{FEW_SHOT_EXAMPLES}\n"
+        f"History: [{history_text}]\n"
+        f"Observation: \"{observation}\"\n"
+        "Output JSON:"
+    )
+
+
+def parse_extraction_output(text: str) -> ExtractionResult:
+    """Parse an LLM extraction completion into structured objects."""
+    if not text:
+        return ExtractionResult()
+    payload = _extract_json_block(text)
+    try:
+        data = json.loads(payload)
+    except Exception:
+        return ExtractionResult()
+
+    result = ExtractionResult()
+    result.entities = _parse_entities(data.get("entities"))
+    result.relations = _parse_relations(data.get("relations"))
+    result.events = _parse_events(data.get("events"))
+    result.preferences = _parse_preferences(data.get("preferences"))
+    return result
+
+
+def _extract_json_block(text: str) -> str:
+    fence_match = re.search(r"```(?:json)?(.*?)```", text, flags=re.DOTALL | re.IGNORECASE)
+    if fence_match:
+        return fence_match.group(1).strip()
+    brace_match = re.search(r"\{.*\}", text, flags=re.DOTALL)
+    if brace_match:
+        return brace_match.group(0)
+    return text.strip()
+
+
+def _parse_entities(raw: Any) -> List[ExtractedEntity]:
+    entities: List[ExtractedEntity] = []
+    if not isinstance(raw, list):
+        return entities
+    for item in raw:
+        if not isinstance(item, dict):
+            continue
+        name = _clean_str(item.get("name") or item.get("entity"))
+        if not name:
+            continue
+        aliases = [a for a in item.get("aliases", []) if isinstance(a, str)]
+        embedding = _parse_embedding(item.get("embedding"))
+        ent = ExtractedEntity(
+            name=name,
+            type=_clean_str(item.get("type") or item.get("category")),
+            aliases=aliases,
+            properties=item.get("properties") or {},
+            embedding=embedding,
+            confidence=_to_float(item.get("confidence"), 1.0),
+            time=_to_int(item.get("time")),
+        )
+        entities.append(ent)
+    return entities
+
+
+def _parse_relations(raw: Any) -> List[ExtractedRelation]:
+    relations: List[ExtractedRelation] = []
+    if not isinstance(raw, list):
+        return relations
+    for item in raw:
+        if not isinstance(item, dict):
+            continue
+        source = _clean_str(item.get("source"))
+        target = _clean_str(item.get("target"))
+        rel_label = _clean_str(item.get("rel_label") or item.get("relation"))
+        if not (source and target and rel_label):
+            continue
+        relations.append(
+            ExtractedRelation(
+                source=source,
+                target=target,
+                rel_label=rel_label,
+                evidence=_clean_str(item.get("evidence")),
+                confidence=_to_float(item.get("confidence"), 1.0),
+                time=_to_int(item.get("time")),
+            )
+        )
+    return relations
+
+
+def _parse_events(raw: Any) -> List[ExtractedEvent]:
+    events: List[ExtractedEvent] = []
+    if not isinstance(raw, list):
+        return events
+    for item in raw:
+        if not isinstance(item, dict):
+            continue
+        desc = _clean_str(item.get("description") or item.get("event"))
+        if not desc:
+            continue
+        participants = [p for p in item.get("participants", []) if isinstance(p, str)]
+        events.append(
+            ExtractedEvent(
+                description=desc,
+                participants=participants,
+                properties=item.get("properties") or {},
+                confidence=_to_float(item.get("confidence"), 1.0),
+                time=_to_int(item.get("time")),
+            )
+        )
+    return events
+
+
+def _parse_preferences(raw: Any) -> List[ExtractedPreference]:
+    prefs: List[ExtractedPreference] = []
+    if not isinstance(raw, list):
+        return prefs
+    for item in raw:
+        if not isinstance(item, dict):
+            continue
+        slot = _clean_str(item.get("slot") or item.get("type"))
+        value = _clean_str(item.get("value"))
+        if not value:
+            continue
+        prefs.append(
+            ExtractedPreference(
+                actor=_clean_str(item.get("actor")) or "player",
+                slot=slot or "goal",
+                value=value,
+                evidence=_clean_str(item.get("evidence")),
+                confidence=_to_float(item.get("confidence"), 0.5),
+                time=_to_int(item.get("time")),
+            )
+        )
+    return prefs
+
+
+def _parse_embedding(raw: Any) -> Optional[List[float]]:
+    if not isinstance(raw, list):
+        return None
+    cleaned: List[float] = []
+    for val in raw:
+        try:
+            cleaned.append(float(val))
+        except (TypeError, ValueError):
+            continue
+    return cleaned or None
+
+
+def _to_float(val: Any, default: float) -> float:
+    try:
+        return float(val)
+    except (TypeError, ValueError):
+        return default
+
+
+def _to_int(val: Any) -> Optional[int]:
+    try:
+        return int(val)
+    except (TypeError, ValueError):
+        return None
+
+
+def _clean_str(val: Any) -> str:
+    return str(val).strip() if isinstance(val, str) else ""
+
+
+@dataclass
+class GroundedUpdate:
+    entity_nodes: Dict[str, str] = field(default_factory=dict)
+    event_nodes: Dict[str, str] = field(default_factory=dict)
+    relation_edges: List[str] = field(default_factory=list)
+    preference_nodes: List[str] = field(default_factory=list)
+
+
+class Grounder:
+    """Ground extracted tuples into the graph store with aliasing."""
+
+    def __init__(self, store: GraphStore, embedding_threshold: float = 0.8) -> None:
+        self.store = store
+        self.embedding_threshold = embedding_threshold
+
+    def ground(self, extraction: ExtractionResult, turn_id: Optional[int] = None) -> GroundedUpdate:
+        entity_map = self._ground_entities(extraction.entities, turn_id)
+        event_map = self._ground_events(extraction.events, entity_map, turn_id)
+        relation_edges = self._ground_relations(extraction.relations, entity_map, turn_id)
+        preference_nodes = self._ground_preferences(extraction.preferences, entity_map, turn_id)
+        return GroundedUpdate(
+            entity_nodes=entity_map,
+            event_nodes=event_map,
+            relation_edges=relation_edges,
+            preference_nodes=preference_nodes,
+        )
+
+    def _ground_entities(self, entities: List[ExtractedEntity], turn_id: Optional[int]) -> Dict[str, str]:
+        mapping: Dict[str, str] = {}
+        for ent in entities:
+            aliases = [ent.name] + [a for a in ent.aliases if a]
+            candidates: List[str] = []
+            for alias in aliases:
+                candidates.extend(self.store.lookup_surface(alias))
+            roots = {self.store.find_root(cid) for cid in candidates} if candidates else set()
+
+            chosen: Optional[str] = None
+            if roots:
+                chosen = next(iter(roots))
+                for other in list(roots)[1:]:
+                    chosen = self.store.merge_aliases(chosen, other)
+
+            if chosen is None and ent.embedding:
+                hits = self.store.search_by_embedding(ent.embedding, top_k=3)
+                if hits and hits[0][1] >= self.embedding_threshold:
+                    chosen = self.store.find_root(hits[0][0])
+
+            if chosen is None:
+                node = self.store.add_node(
+                    node_type=ent.type or "entity",
+                    aliases=aliases,
+                    properties=ent.properties,
+                    embedding=ent.embedding,
+                    confidence=ent.confidence,
+                    provenance={"source": "extraction"},
+                    valid_from=turn_id,
+                )
+                chosen = node.node_id
+            else:
+                node = self.store.nodes[chosen]
+                new_aliases = [a for a in aliases if a not in node.aliases]
+                if new_aliases:
+                    node.aliases.extend(new_aliases)
+                    for surface in new_aliases:
+                        self.store.surface_index[surface.lower()].add(chosen)
+            mapping[ent.name] = chosen
+        return mapping
+
+    def _ground_events(
+        self, events: List[ExtractedEvent], entity_map: Dict[str, str], turn_id: Optional[int]
+    ) -> Dict[str, str]:
+        event_nodes: Dict[str, str] = {}
+        for ev in events:
+            node = self.store.add_node(
+                node_type="event",
+                aliases=[ev.description],
+                properties={"description": ev.description, **ev.properties},
+                confidence=ev.confidence,
+                provenance={"source": "extraction"},
+                valid_from=turn_id if ev.time is None else ev.time,
+            )
+            event_nodes[ev.description] = node.node_id
+            for participant in ev.participants:
+                src = entity_map.get(participant) or self._ensure_entity(participant, entity_map, turn_id)
+                self.store.add_edge(
+                    source=src,
+                    target=node.node_id,
+                    rel_label="participates_in",
+                    provenance={"source": "extraction"},
+                    valid_from=turn_id if ev.time is None else ev.time,
+                    confidence=ev.confidence,
+                )
+        return event_nodes
+
+    def _ground_relations(
+        self, relations: List[ExtractedRelation], entity_map: Dict[str, str], turn_id: Optional[int]
+    ) -> List[str]:
+        edges: List[str] = []
+        for rel in relations:
+            source_id = entity_map.get(rel.source) or self._ensure_entity(rel.source, entity_map, turn_id)
+            target_id = entity_map.get(rel.target) or self._ensure_entity(rel.target, entity_map, turn_id)
+            edge = self.store.add_edge(
+                source=source_id,
+                target=target_id,
+                rel_label=rel.rel_label,
+                confidence=rel.confidence,
+                provenance={"source": "extraction", "evidence": rel.evidence} if rel.evidence else {"source": "extraction"},
+                valid_from=turn_id if rel.time is None else rel.time,
+            )
+            edges.append(edge.edge_id)
+        return edges
+
+    def _ground_preferences(
+        self, prefs: List[ExtractedPreference], entity_map: Dict[str, str], turn_id: Optional[int]
+    ) -> List[str]:
+        nodes: List[str] = []
+        for pref in prefs:
+            pref_node = self.store.add_node(
+                node_type="preference",
+                aliases=[f"{pref.slot}:{pref.value}"],
+                properties={"slot": pref.slot, "value": pref.value},
+                confidence=pref.confidence,
+                provenance={"source": "extraction", "evidence": pref.evidence} if pref.evidence else {"source": "extraction"},
+                valid_from=turn_id if pref.time is None else pref.time,
+            )
+            nodes.append(pref_node.node_id)
+            actor_id = entity_map.get(pref.actor) or self._ensure_entity(pref.actor, entity_map, turn_id)
+            self.store.add_edge(
+                source=actor_id,
+                target=pref_node.node_id,
+                rel_label=f"prefers::{pref.slot}",
+                confidence=pref.confidence,
+                provenance={"source": "extraction"},
+                valid_from=turn_id if pref.time is None else pref.time,
+            )
+        return nodes
+
+    def _ensure_entity(self, name: str, entity_map: Dict[str, str], turn_id: Optional[int]) -> str:
+        if name in entity_map:
+            return entity_map[name]
+        node = self.store.add_node(
+            node_type="entity",
+            aliases=[name],
+            provenance={"source": "extraction", "note": "auto-created for relation grounding"},
+            valid_from=turn_id,
+        )
+        entity_map[name] = node.node_id
+        return node.node_id
