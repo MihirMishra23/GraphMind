@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import logging
 import sys
 from pathlib import Path
 from typing import Any, Dict, List, Optional
@@ -176,11 +177,19 @@ def parse_args() -> argparse.Namespace:
         action="store_true",
         help="Include inactive (closed) nodes/edges in GraphViz export.",
     )
+    parser.add_argument(
+        "--log-level",
+        type=str,
+        default="INFO",
+        help="Logging level (DEBUG, INFO, WARNING, ERROR).",
+    )
     return parser.parse_args()
 
 
 def main() -> None:
     args = parse_args()
+
+    logging.basicConfig(level=getattr(logging, args.log_level.upper(), logging.INFO))
 
     env = FrotzEnv(str(args.game), seed=args.seed)
     shared_llm: Optional[LLM] = None

@@ -3,10 +3,13 @@ from __future__ import annotations
 
 import json
 import re
+import logging
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional
 
 from .graph_store import GraphStore
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -321,11 +324,24 @@ class Grounder:
                 chosen = next(iter(roots))
                 for other in list(roots)[1:]:
                     chosen = self.store.merge_aliases(chosen, other)
+                logger.debug(
+                    "Reusing entity node %s for aliases=%s (roots=%s, merged=%s)",
+                    chosen,
+                    aliases,
+                    roots,
+                    chosen,
+                )
 
             if chosen is None and ent.embedding:
                 hits = self.store.search_by_embedding(ent.embedding, top_k=3)
                 if hits and hits[0][1] >= self.embedding_threshold:
                     chosen = self.store.find_root(hits[0][0])
+                    logger.debug(
+                        "Reusing entity node %s via embedding match score=%.3f for aliases=%s",
+                        chosen,
+                        hits[0][1],
+                        aliases,
+                    )
 
             if chosen is None:
                 node = self.store.add_node(
@@ -338,6 +354,13 @@ class Grounder:
                     valid_from=turn_id,
                 )
                 chosen = node.node_id
+                logger.debug(
+                    "Created new entity node %s for aliases=%s (type=%s, turn=%s)",
+                    chosen,
+                    aliases,
+                    ent.type or "entity",
+                    turn_id,
+                )
             else:
                 node = self.store.nodes[chosen]
                 new_aliases = [a for a in aliases if a not in node.aliases]
@@ -345,6 +368,12 @@ class Grounder:
                     node.aliases.extend(new_aliases)
                     for surface in new_aliases:
                         self.store.surface_index[surface.lower()].add(chosen)
+                    logger.debug(
+                        "Augmented aliases for entity %s with %s (turn=%s)",
+                        chosen,
+                        new_aliases,
+                        turn_id,
+                    )
             mapping[ent.name] = chosen
         return mapping
 
@@ -362,6 +391,13 @@ class Grounder:
                 valid_from=turn_id if ev.time is None else ev.time,
             )
             event_nodes[ev.description] = node.node_id
+            logger.debug(
+                "Created new event node %s for description=%r (participants=%s, turn=%s)",
+                node.node_id,
+                ev.description,
+                ev.participants,
+                turn_id if ev.time is None else ev.time,
+            )
             for participant in ev.participants:
                 src = entity_map.get(participant) or self._ensure_entity(participant, entity_map, turn_id)
                 self.store.add_edge(
@@ -371,6 +407,13 @@ class Grounder:
                     provenance={"source": "extraction"},
                     valid_from=turn_id if ev.time is None else ev.time,
                     confidence=ev.confidence,
+                )
+                logger.debug(
+                    "Created participates_in edge from %s to event %s for participant=%r (turn=%s)",
+                    src,
+                    node.node_id,
+                    participant,
+                    turn_id if ev.time is None else ev.time,
                 )
         return event_nodes
 
@@ -390,6 +433,15 @@ class Grounder:
                 valid_from=turn_id if rel.time is None else rel.time,
             )
             edges.append(edge.edge_id)
+            logger.debug(
+                "Created relation edge %s (%s -> %s) label=%s (turn=%s, conf=%.2f)",
+                edge.edge_id,
+                source_id,
+                target_id,
+                rel.rel_label,
+                turn_id if rel.time is None else rel.time,
+                rel.confidence,
+            )
         return edges
 
     def _ground_preferences(
@@ -415,6 +467,14 @@ class Grounder:
                 provenance={"source": "extraction"},
                 valid_from=turn_id if pref.time is None else pref.time,
             )
+            logger.debug(
+                "Created preference node %s for %s:%s and edge from actor %s (turn=%s)",
+                pref_node.node_id,
+                pref.slot,
+                pref.value,
+                actor_id,
+                turn_id if pref.time is None else pref.time,
+            )
         return nodes
 
     def _ensure_entity(self, name: str, entity_map: Dict[str, str], turn_id: Optional[int]) -> str:
@@ -427,4 +487,10 @@ class Grounder:
             valid_from=turn_id,
         )
         entity_map[name] = node.node_id
+        logger.debug(
+            "Auto-created entity node %s for name=%r while grounding relation/preference (turn=%s)",
+            node.node_id,
+            name,
+            turn_id,
+        )
         return node.node_id
