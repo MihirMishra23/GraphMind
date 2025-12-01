@@ -8,15 +8,13 @@ import sys
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
-import torch
-
 # Make src/ available for imports when running as a script.
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 SRC_PATH = PROJECT_ROOT / "src"
 if str(SRC_PATH) not in sys.path:
     sys.path.insert(0, str(SRC_PATH))
 
-from agent import BaseAgent, LLMAgent, WalkthroughAgent  # type: ignore
+from agent import BaseAgent, build_agent  # type: ignore
 from llm import LLM, LlamaLLM  # type: ignore
 
 try:
@@ -25,42 +23,6 @@ except ImportError as exc:  # pragma: no cover - environment dependency
     raise SystemExit(
         "Jericho is not installed. Please install with `pip install jericho` before running."
     ) from exc
-
-
-def build_agent(
-    name: str, args: argparse.Namespace, llm_client: Optional[LLM]
-) -> BaseAgent:
-    if name == "walkthrough":
-        return WalkthroughAgent()
-    if name == "llm":
-        if llm_client is None:
-            device_map = resolve_device_map(args.device_map)
-            llm_client = LlamaLLM(
-                model_id=args.model_id,
-                device_map=device_map,
-                torch_dtype=args.torch_dtype,
-            )
-        return LLMAgent(
-            llm=llm_client,
-            max_tokens=args.llm_max_tokens,
-            temperature=args.llm_temperature,
-            memory_mode=args.memory_mode,
-            extraction_max_tokens=args.extract_max_tokens,
-            extraction_temperature=args.extract_temperature,
-        )
-    raise ValueError(f"Unsupported agent type: {name}")
-
-
-def resolve_device_map(requested: str) -> str:
-    """Pick device map with priority: cuda > mps > cpu, unless explicitly set."""
-    req = requested.lower()
-    if req != "auto":
-        return requested
-    if torch.cuda.is_available():
-        return "cuda"
-    if torch.backends.mps.is_available():
-        return "mps"
-    return "cpu"
 
 
 def run_episode(
@@ -101,12 +63,16 @@ def run_episode(
     return trajectory
 
 
-def save_logs(text_log: Optional[Path], json_log: Optional[Path], trajectory: List[Dict[str, Any]]) -> None:
+def save_logs(
+    text_log: Optional[Path], json_log: Optional[Path], trajectory: List[Dict[str, Any]]
+) -> None:
     if text_log:
         lines = []
         for row in trajectory:
             lines.append(f"Step {row['step']}: action {row['action']}")
-            lines.append(str((row["observation"], row["reward"], row["done"], row["info"])))
+            lines.append(
+                str((row["observation"], row["reward"], row["done"], row["info"]))
+            )
         text_log.write_text("\n".join(lines))
 
     if json_log:
@@ -121,13 +87,28 @@ def parse_args() -> argparse.Namespace:
         default=Path("data/jericho/z-machine-games-master/jericho-game-suite/zork1.z5"),
         help="Path to the .z machine file",
     )
-    parser.add_argument("--agent", type=str, default="walkthrough", help="Agent type (walkthrough|llm)")
-    parser.add_argument("--max-steps", type=int, default=400, help="Maximum steps to execute")
-    parser.add_argument("--seed", type=int, default=None, help="Random seed for Jericho env")
-    parser.add_argument("--text-log", type=Path, default=None, help="Optional plain-text trajectory log path")
-    parser.add_argument("--json-log", type=Path, default=None, help="Optional JSON trajectory log path")
     parser.add_argument(
-        "--quiet", action="store_true", help="Suppress stdout step printing (still logs if paths provided)"
+        "--agent", type=str, default="walkthrough", help="Agent type (walkthrough|llm)"
+    )
+    parser.add_argument(
+        "--max-steps", type=int, default=400, help="Maximum steps to execute"
+    )
+    parser.add_argument(
+        "--seed", type=int, default=None, help="Random seed for Jericho env"
+    )
+    parser.add_argument(
+        "--text-log",
+        type=Path,
+        default=None,
+        help="Optional plain-text trajectory log path",
+    )
+    parser.add_argument(
+        "--json-log", type=Path, default=None, help="Optional JSON trajectory log path"
+    )
+    parser.add_argument(
+        "--quiet",
+        action="store_true",
+        help="Suppress stdout step printing (still logs if paths provided)",
     )
     parser.add_argument(
         "--model-id",
@@ -147,8 +128,18 @@ def parse_args() -> argparse.Namespace:
         default="auto",
         help="Torch dtype for HF model loading (e.g., float16, bfloat16, auto)",
     )
-    parser.add_argument("--llm-max-tokens", type=int, default=32, help="Max new tokens for LLM action generation")
-    parser.add_argument("--llm-temperature", type=float, default=0.5, help="Sampling temperature for LLM agent")
+    parser.add_argument(
+        "--llm-max-tokens",
+        type=int,
+        default=32,
+        help="Max new tokens for LLM action generation",
+    )
+    parser.add_argument(
+        "--llm-temperature",
+        type=float,
+        default=0.5,
+        help="Sampling temperature for LLM agent",
+    )
     parser.add_argument(
         "--memory-mode",
         type=str,
@@ -194,8 +185,11 @@ def main() -> None:
     env = FrotzEnv(str(args.game), seed=args.seed)
     shared_llm: Optional[LLM] = None
     if args.agent == "llm":
-        device_map = resolve_device_map(args.device_map)
-        shared_llm = LlamaLLM(model_id=args.model_id, device_map=device_map, torch_dtype=args.torch_dtype)
+        shared_llm = LlamaLLM(
+            model_id=args.model_id,
+            device_map=args.device_map,
+            torch_dtype=args.torch_dtype,
+        )
 
     agent = build_agent(args.agent, args=args, llm_client=shared_llm)
 
