@@ -382,25 +382,69 @@ class Grounder:
     ) -> Dict[str, str]:
         event_nodes: Dict[str, str] = {}
         for ev in events:
-            node = self.store.add_node(
-                node_type="event",
-                aliases=[ev.description],
-                properties={"description": ev.description, **ev.properties},
-                confidence=ev.confidence,
-                provenance={"source": "extraction"},
-                valid_from=turn_id if ev.time is None else ev.time,
-            )
+            # Reuse an existing event node if the description already exists as an alias.
+            candidates = self.store.lookup_surface(ev.description)
+            roots = {self.store.find_root(cid) for cid in candidates} if candidates else set()
+            chosen: Optional[str] = None
+            if roots:
+                chosen = next(iter(roots))
+                for other in list(roots)[1:]:
+                    chosen = self.store.merge_aliases(chosen, other)
+                logger.debug(
+                    "Reusing event node %s for description=%r (roots=%s)",
+                    chosen,
+                    ev.description,
+                    roots,
+                )
+
+            if chosen is None:
+                node = self.store.add_node(
+                    node_type="event",
+                    aliases=[ev.description],
+                    properties={"description": ev.description, **ev.properties},
+                    confidence=ev.confidence,
+                    provenance={"source": "extraction"},
+                    valid_from=turn_id if ev.time is None else ev.time,
+                )
+                chosen = node.node_id
+                logger.debug(
+                    "Created new event node %s for description=%r (participants=%s, turn=%s)",
+                    chosen,
+                    ev.description,
+                    ev.participants,
+                    turn_id if ev.time is None else ev.time,
+                )
+            else:
+                # Ensure the description is captured as an alias on the reused node.
+                node = self.store.nodes[chosen]
+                if ev.description not in node.aliases:
+                    node.aliases.append(ev.description)
+                    self.store.surface_index[ev.description.lower()].add(chosen)
+                    logger.debug(
+                        "Augmented aliases for event %s with %r", chosen, ev.description
+                    )
+
             event_nodes[ev.description] = node.node_id
-            logger.debug(
-                "Created new event node %s for description=%r (participants=%s, turn=%s)",
-                node.node_id,
-                ev.description,
-                ev.participants,
-                turn_id if ev.time is None else ev.time,
-            )
             for participant in ev.participants:
                 src = entity_map.get(participant) or self._ensure_entity(participant, entity_map, turn_id)
-                self.store.add_edge(
+                existing_edge = next(
+                    (
+                        e
+                        for e in self.store.active_edges()
+                        if e.source == src and e.target == node.node_id and e.rel_label == "participates_in"
+                    ),
+                    None,
+                )
+                if existing_edge:
+                    logger.debug(
+                        "Reusing participates_in edge %s from %s to event %s for participant=%r",
+                        existing_edge.edge_id,
+                        src,
+                        node.node_id,
+                        participant,
+                    )
+                    continue
+                edge = self.store.add_edge(
                     source=src,
                     target=node.node_id,
                     rel_label="participates_in",
@@ -409,7 +453,8 @@ class Grounder:
                     confidence=ev.confidence,
                 )
                 logger.debug(
-                    "Created participates_in edge from %s to event %s for participant=%r (turn=%s)",
+                    "Created participates_in edge %s from %s to event %s for participant=%r (turn=%s)",
+                    edge.edge_id,
                     src,
                     node.node_id,
                     participant,
