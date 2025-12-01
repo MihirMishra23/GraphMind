@@ -17,8 +17,7 @@ if str(SRC_PATH) not in sys.path:
     sys.path.insert(0, str(SRC_PATH))
 
 from agent import BaseAgent, LLMAgent, WalkthroughAgent  # type: ignore
-from memory import NullMemory  # type: ignore
-from llm import LlamaLLM  # type: ignore
+from llm import LLM, LlamaLLM  # type: ignore
 
 try:
     from jericho import FrotzEnv
@@ -28,21 +27,26 @@ except ImportError as exc:  # pragma: no cover - environment dependency
     ) from exc
 
 
-def build_agent(name: str, memory: Optional[object], args: argparse.Namespace) -> BaseAgent:
+def build_agent(
+    name: str, args: argparse.Namespace, llm_client: Optional[LLM]
+) -> BaseAgent:
     if name == "walkthrough":
-        return WalkthroughAgent(memory=memory)
+        return WalkthroughAgent()
     if name == "llm":
-        device_map = resolve_device_map(args.device_map)
-        llm_client = LlamaLLM(
-            model_id=args.model_id,
-            device_map=device_map,
-            torch_dtype=args.torch_dtype,
-        )
+        if llm_client is None:
+            device_map = resolve_device_map(args.device_map)
+            llm_client = LlamaLLM(
+                model_id=args.model_id,
+                device_map=device_map,
+                torch_dtype=args.torch_dtype,
+            )
         return LLMAgent(
             llm=llm_client,
-            memory=memory,
             max_tokens=args.llm_max_tokens,
             temperature=args.llm_temperature,
+            memory_mode=args.memory_mode,
+            extraction_max_tokens=args.extract_max_tokens,
+            extraction_temperature=args.extract_temperature,
         )
     raise ValueError(f"Unsupported agent type: {name}")
 
@@ -62,7 +66,6 @@ def resolve_device_map(requested: str) -> str:
 def run_episode(
     env: FrotzEnv,
     agent: BaseAgent,
-    memory: NullMemory,
     max_steps: int,
     verbose: bool = True,
 ) -> List[Dict[str, Any]]:
@@ -76,7 +79,7 @@ def run_episode(
             break
 
         observation, reward, done, info = env.step(action)
-        memory.observe(step, action, observation, reward, info)
+        agent.observe(step, action, observation, reward, info)
 
         record = {
             "step": step,
@@ -146,6 +149,42 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument("--llm-max-tokens", type=int, default=32, help="Max new tokens for LLM action generation")
     parser.add_argument("--llm-temperature", type=float, default=0.5, help="Sampling temperature for LLM agent")
+    parser.add_argument(
+        "--memory-mode",
+        type=str,
+        default="none",
+        choices=["none", "llama"],
+        help="Memory pipeline: none (disable) or llama (LLM extraction + grounding).",
+    )
+    parser.add_argument(
+        "--extract-max-tokens",
+        type=int,
+        default=256,
+        help="Max new tokens for extraction LLM completions.",
+    )
+    parser.add_argument(
+        "--extract-temperature",
+        type=float,
+        default=0.0,
+        help="Sampling temperature for extraction LLM (0 for deterministic).",
+    )
+    parser.add_argument(
+        "--graphviz-dot",
+        type=Path,
+        default=None,
+        help="Optional path to write GraphViz DOT export of the memory graph.",
+    )
+    parser.add_argument(
+        "--graphviz-png",
+        type=Path,
+        default=None,
+        help="Optional path to also render PNG (requires `dot` binary on PATH). If not provided, uses DOT path with .png.",
+    )
+    parser.add_argument(
+        "--graphviz-include-inactive",
+        action="store_true",
+        help="Include inactive (closed) nodes/edges in GraphViz export.",
+    )
     return parser.parse_args()
 
 
@@ -153,11 +192,26 @@ def main() -> None:
     args = parse_args()
 
     env = FrotzEnv(str(args.game), seed=args.seed)
-    memory = NullMemory()
-    agent = build_agent(args.agent, memory=memory, args=args)
+    shared_llm: Optional[LLM] = None
+    if args.agent == "llm":
+        device_map = resolve_device_map(args.device_map)
+        shared_llm = LlamaLLM(model_id=args.model_id, device_map=device_map, torch_dtype=args.torch_dtype)
 
-    trajectory = run_episode(env, agent, memory, max_steps=args.max_steps, verbose=not args.quiet)
+    agent = build_agent(args.agent, args=args, llm_client=shared_llm)
+
+    trajectory = run_episode(
+        env,
+        agent,
+        max_steps=args.max_steps,
+        verbose=not args.quiet,
+    )
     save_logs(args.text_log, args.json_log, trajectory)
+    if args.graphviz_dot:
+        agent.export_memory(
+            args.graphviz_dot,
+            include_inactive=args.graphviz_include_inactive,
+            png_path=args.graphviz_png,
+        )
 
 
 if __name__ == "__main__":
