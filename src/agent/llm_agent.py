@@ -5,7 +5,16 @@ from pathlib import Path
 from typing import Dict, List, Optional, Sequence
 
 from llm import LLM
-from memory import GraphStore, Grounder, build_extraction_prompt, parse_extraction_output
+from memory import (
+    ExtractedEntity,
+    ExtractedEvent,
+    ExtractedRelation,
+    ExtractionResult,
+    GraphStore,
+    Grounder,
+    build_extraction_prompt,
+    parse_extraction_output,
+)
 from tools import export_graphviz
 
 from .base import BaseAgent
@@ -30,6 +39,7 @@ class LLMAgent(BaseAgent):
         actions_key: str = "valid_actions",
         extraction_max_tokens: int = 256,
         extraction_temperature: float = 0.0,
+        extraction_mode: str = "llm",
     ) -> None:
         super().__init__(memory=None)
         self.llm = llm
@@ -41,6 +51,7 @@ class LLMAgent(BaseAgent):
         self.actions_key = actions_key
         self.extraction_max_tokens = extraction_max_tokens
         self.extraction_temperature = extraction_temperature
+        self.extraction_mode = extraction_mode
         self._recent: List[Dict[str, str]] = []
         self._history: List[str] = []
         self.memory_store: Optional[GraphStore] = None
@@ -79,14 +90,17 @@ class LLMAgent(BaseAgent):
             self._history.append(f"{action} -> {observation}")
 
         if self.grounder and self.memory_store:
-            prompt = build_extraction_prompt(observation, self._history[-5:])
-            completion = self.llm.generate(
-                prompt,
-                max_tokens=self.extraction_max_tokens,
-                temperature=self.extraction_temperature,
-                stop=None,
-            )
-            extraction = parse_extraction_output(completion)
+            if self.extraction_mode == "naive":
+                extraction = self._naive_extract(observation, self._history, turn_id)
+            else:
+                prompt = build_extraction_prompt(observation, self._history[-5:])
+                completion = self.llm.generate(
+                    prompt,
+                    max_tokens=self.extraction_max_tokens,
+                    temperature=self.extraction_temperature,
+                    stop=None,
+                )
+                extraction = parse_extraction_output(completion)
             self.grounder.ground(extraction, turn_id=turn_id, action=action)
 
     def export_memory(self, dot_path: Path, include_inactive: bool = False, png_path: Optional[Path] = None) -> None:
@@ -146,3 +160,73 @@ class LLMAgent(BaseAgent):
         self.memory_store = GraphStore()
         self.grounder = Grounder(self.memory_store)
         self.memory = self.memory_store
+
+    def _naive_extract(self, observation: str, history: List[str], turn_id: int) -> ExtractionResult:
+        """Lightweight heuristic extractor mirroring the smoke test."""
+        entities: List[ExtractedEntity] = []
+        relations: List[ExtractedRelation] = []
+        events: List[ExtractedEvent] = []
+
+        seen_entities = set()
+        lowered = observation.lower()
+        location_name: Optional[str] = None
+
+        def add_entity(name: str, ent_type: str, confidence: float) -> None:
+            if not name or name in seen_entities:
+                return
+            entities.append(
+                ExtractedEntity(
+                    name=name,
+                    type=ent_type,
+                    aliases=[name],
+                    confidence=confidence,
+                    time=turn_id,
+                )
+            )
+            seen_entities.add(name)
+
+        for marker in ["you are in ", "you are at "]:
+            if marker in lowered:
+                idx = lowered.index(marker) + len(marker)
+                fragment = observation[idx:].split(".")[0].strip()
+                if fragment:
+                    add_entity(fragment, "location", 0.55)
+                    location_name = fragment
+                break
+
+        for token in ["a ", "an ", "the "]:
+            start = 0
+            while True:
+                idx = lowered.find(token, start)
+                if idx == -1:
+                    break
+                chunk = observation[idx + len(token) :].split(",")[0].split(".")[0].strip()
+                chunk = " ".join(chunk.split()[:3])
+                add_entity(chunk, "object", 0.45)
+                start = idx + len(token)
+
+        if location_name:
+            for ent in entities:
+                if ent.name == location_name:
+                    continue
+                relations.append(
+                    ExtractedRelation(
+                        source=location_name,
+                        target=ent.name,
+                        rel_label="contains",
+                        confidence=0.4,
+                        time=turn_id,
+                    )
+                )
+
+        events.append(
+            ExtractedEvent(
+                description=observation[:180],
+                participants=[e.name for e in entities],
+                properties={},
+                confidence=0.4,
+                time=turn_id,
+            )
+        )
+
+        return ExtractionResult(entities=entities, relations=relations, events=events)

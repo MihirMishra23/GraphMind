@@ -178,6 +178,13 @@ def parse_args() -> argparse.Namespace:
         help="Include inactive (closed) nodes/edges in GraphViz export.",
     )
     parser.add_argument(
+        "--extraction-mode",
+        type=str,
+        default="naive",
+        choices=["llm", "naive"],
+        help="Extraction pipeline: llm (prompted extraction) or naive (heuristic).",
+    )
+    parser.add_argument(
         "--log-level",
         type=str,
         default="INFO",

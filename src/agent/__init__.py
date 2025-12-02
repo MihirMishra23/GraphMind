@@ -25,7 +25,9 @@ def resolve_device_map(requested: str) -> str:
     return "cpu"
 
 
-def build_agent(name: str, args: argparse.Namespace, llm_client: Optional[LLM]) -> BaseAgent:
+def build_agent(
+    name: str, args: argparse.Namespace, llm_client: Optional[LLM]
+) -> BaseAgent:
     if name == "walkthrough":
         return WalkthroughAgent()
     if name == "llm":
@@ -43,8 +45,16 @@ def build_agent(name: str, args: argparse.Namespace, llm_client: Optional[LLM]) 
             memory_mode=args.memory_mode,
             extraction_max_tokens=args.extract_max_tokens,
             extraction_temperature=args.extract_temperature,
+            extraction_mode=args.extraction_mode,
         )
+
     raise ValueError(f"Unsupported agent type: {name}")
 
 
-__all__ = ["BaseAgent", "WalkthroughAgent", "LLMAgent", "build_agent", "resolve_device_map"]
+__all__ = [
+    "BaseAgent",
+    "WalkthroughAgent",
+    "LLMAgent",
+    "build_agent",
+    "resolve_device_map",
+]
