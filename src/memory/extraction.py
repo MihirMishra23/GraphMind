@@ -297,12 +297,55 @@ class Grounder:
     def __init__(self, store: GraphStore, embedding_threshold: float = 0.8) -> None:
         self.store = store
         self.embedding_threshold = embedding_threshold
+        self.last_event_node: Optional[str] = None
 
-    def ground(self, extraction: ExtractionResult, turn_id: Optional[int] = None) -> GroundedUpdate:
+    def ground(
+        self, extraction: ExtractionResult, turn_id: Optional[int] = None, action: Optional[str] = None
+    ) -> GroundedUpdate:
         entity_map = self._ground_entities(extraction.entities, turn_id)
         event_map = self._ground_events(extraction.events, entity_map, turn_id)
         relation_edges = self._ground_relations(extraction.relations, entity_map, turn_id)
         preference_nodes = self._ground_preferences(extraction.preferences, entity_map, turn_id)
+
+        if action and event_map:
+            current_event_id = next(iter(event_map.values()))
+            if self.last_event_node:
+                existing = next(
+                    (
+                        e
+                        for e in self.store.active_edges()
+                        if e.source == self.last_event_node
+                        and e.target == current_event_id
+                        and e.rel_label == action
+                    ),
+                    None,
+                )
+                if existing:
+                    logger.debug(
+                        "Reusing action edge %s (%s -[%s]-> %s)",
+                        existing.edge_id,
+                        self.last_event_node,
+                        action,
+                        current_event_id,
+                    )
+                else:
+                    edge = self.store.add_edge(
+                        source=self.last_event_node,
+                        target=current_event_id,
+                        rel_label=action,
+                        provenance={"source": "action"},
+                        valid_from=turn_id,
+                    )
+                    logger.debug(
+                        "Created action edge %s (%s -[%s]-> %s) at turn=%s",
+                        edge.edge_id,
+                        self.last_event_node,
+                        action,
+                        current_event_id,
+                        turn_id,
+                    )
+            self.last_event_node = current_event_id
+
         return GroundedUpdate(
             entity_nodes=entity_map,
             event_nodes=event_map,

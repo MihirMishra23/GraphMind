@@ -87,7 +87,7 @@ class LLMAgent(BaseAgent):
                 stop=None,
             )
             extraction = parse_extraction_output(completion)
-            self.grounder.ground(extraction, turn_id=turn_id)
+            self.grounder.ground(extraction, turn_id=turn_id, action=action)
 
     def export_memory(self, dot_path: Path, include_inactive: bool = False, png_path: Optional[Path] = None) -> None:
         """Visualize the current graph memory if enabled."""
