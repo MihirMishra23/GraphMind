@@ -34,7 +34,9 @@ except ImportError as exc:  # pragma: no cover - environment dependency
     ) from exc
 
 
-def naive_extract(observation: str, history: List[str], turn_id: int) -> ExtractionResult:
+def naive_extract(
+    observation: str, history: List[str], turn_id: int
+) -> ExtractionResult:
     """Very lightweight heuristic extractor to avoid loading a real LLM."""
     entities: List[ExtractedEntity] = []
     relations: List[ExtractedRelation] = []
@@ -115,11 +117,15 @@ def summarize_graph(store: GraphStore) -> None:
     print("\nNodes:")
     for node in store.nodes.values():
         status = "active" if node.valid_to is None else f"closed@{node.valid_to}"
-        print(f"- {node.node_id} [{node.node_type}] aliases={node.aliases} props={node.properties} ({status})")
+        print(
+            f"- {node.node_id} [{node.node_type}] aliases={node.aliases} props={node.properties} ({status})"
+        )
     print("\nEdges:")
     for edge in store.edges.values():
         status = "active" if edge.valid_to is None else f"closed@{edge.valid_to}"
-        print(f"- {edge.edge_id} {edge.source} -[{edge.rel_label}]-> {edge.target} ({status})")
+        print(
+            f"- {edge.edge_id} {edge.source} -[{edge.rel_label}]-> {edge.target} ({status})"
+        )
 
 
 def parse_args() -> argparse.Namespace:
@@ -130,10 +136,16 @@ def parse_args() -> argparse.Namespace:
         default=Path("data/jericho/z-machine-games-master/jericho-game-suite/zork1.z5"),
         help="Path to the .z machine file",
     )
-    parser.add_argument("--max-steps", type=int, default=50, help="Maximum steps to execute")
-    parser.add_argument("--seed", type=int, default=None, help="Random seed for Jericho env")
     parser.add_argument(
-        "--quiet", action="store_true", help="Suppress per-step prints (still summarizes graph at end)"
+        "--max-steps", type=int, default=50, help="Maximum steps to execute"
+    )
+    parser.add_argument(
+        "--seed", type=int, default=None, help="Random seed for Jericho env"
+    )
+    parser.add_argument(
+        "--quiet",
+        action="store_true",
+        help="Suppress per-step prints (still summarizes graph at end)",
     )
     parser.add_argument(
         "--use-llm-output",
@@ -173,7 +185,7 @@ def main() -> None:
     logging.basicConfig(level=getattr(logging, args.log_level.upper(), logging.INFO))
 
     env = FrotzEnv(str(args.game), seed=args.seed)
-    agent = WalkthroughAgent()
+    agent = WalkthroughAgent(env.get_walkthrough())
     store = GraphStore()
     grounder = Grounder(store)
 
@@ -183,7 +195,7 @@ def main() -> None:
         print("Initial observation:", observation)
 
     for step in range(args.max_steps):
-        action = agent.act(observation, info)
+        action = agent.act(observation, env.get_valid_actions())
         if action is None:
             break
 

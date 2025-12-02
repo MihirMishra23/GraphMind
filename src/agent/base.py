@@ -36,6 +36,6 @@ class BaseAgent(ABC):
         return None
 
     @abstractmethod
-    def act(self, observation: str, info: Optional[dict] = None) -> Optional[str]:
+    def act(self, observation: str, action_candidates: list[str]) -> Optional[str]:
         """Return the next action string for the environment."""
         raise NotImplementedError

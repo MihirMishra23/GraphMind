@@ -37,7 +37,7 @@ def run_episode(
     trajectory: List[Dict[str, Any]] = []
 
     for step in range(max_steps):
-        action = agent.act(observation, info)
+        action = agent.act(observation, env.get_valid_actions())
         if action is None:
             break
 

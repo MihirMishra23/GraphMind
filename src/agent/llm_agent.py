@@ -69,21 +69,25 @@ class LLMAgent(BaseAgent):
             self.memory_store = None
             self.grounder = None
 
-    def act(self, observation: str, info: Optional[dict] = None) -> Optional[str]:
-        candidates = self._extract_candidates(info)
-        if not candidates:
-            candidates = ["look"]
-
-        prompt = self._build_prompt(observation, candidates)
+    def act(self, observation: str, action_candidates: List[str]) -> Optional[str]:
+        prompt = self._build_prompt(observation, action_candidates)
         completion = self.llm.generate(
-            prompt, max_tokens=self.max_tokens, temperature=self.temperature, stop=["\n"]
+            prompt,
+            max_tokens=self.max_tokens,
+            temperature=self.temperature,
+            stop=["\n"],
         )
-        action = self._choose_from_candidates(completion, candidates)
+        action = self._choose_from_candidates(completion, action_candidates)
         self._push_history(action, observation)
         return action or "look"
 
     def observe(
-        self, turn_id: int, action: str, observation: str, reward: float, info: Optional[dict] = None
+        self,
+        turn_id: int,
+        action: str,
+        observation: str,
+        reward: float,
+        info: Optional[dict] = None,
     ) -> None:
         """Update in-memory graph from the completed step."""
         if action:
@@ -103,7 +107,12 @@ class LLMAgent(BaseAgent):
                 extraction = parse_extraction_output(completion)
             self.grounder.ground(extraction, turn_id=turn_id, action=action)
 
-    def export_memory(self, dot_path: Path, include_inactive: bool = False, png_path: Optional[Path] = None) -> None:
+    def export_memory(
+        self,
+        dot_path: Path,
+        include_inactive: bool = False,
+        png_path: Optional[Path] = None,
+    ) -> None:
         """Visualize the current graph memory if enabled."""
         if not self.memory_store:
             return None
@@ -115,14 +124,14 @@ class LLMAgent(BaseAgent):
             png_path=png_path,
         )
 
-    def _build_prompt(self, observation: str, candidates: Sequence[str]) -> str:
+    def _build_prompt(self, observation: str, action_candidates: Sequence[str]) -> str:
         recent_lines = []
         for row in self._recent[-self.history_horizon :]:
             recent_lines.append(f"Action: {row['action']}")
             recent_lines.append(f"Observation: {row['observation']}")
 
         joined_history = "\n".join(recent_lines) if recent_lines else "None"
-        options = "\n".join(f"- {a}" for a in candidates)
+        options = "\n".join(f"- {a}" for a in action_candidates)
         prompt = (
             f"{self.system_prompt}\n\n"
             f"Recent history:\n{joined_history}\n\n"
@@ -135,33 +144,33 @@ class LLMAgent(BaseAgent):
     def _push_history(self, action: str, observation: str) -> None:
         self._recent.append({"action": action, "observation": observation})
 
-    def _extract_candidates(self, info: Optional[dict]) -> List[str]:
-        if info is None:
-            return []
-        candidates = info.get(self.actions_key) or info.get("admissible_commands") or []
-        return [c for c in candidates if isinstance(c, str)]
-
-    def _choose_from_candidates(self, completion: str, candidates: Sequence[str]) -> str:
+    def _choose_from_candidates(
+        self, completion: str, action_candidates: Sequence[str]
+    ) -> str:
         lines = completion.strip().splitlines()
         cleaned = lines[0] if lines else ""
         cleaned_lower = cleaned.lower()
         # Exact match
-        for cand in candidates:
+        for cand in action_candidates:
             if cleaned_lower == cand.lower():
                 return cand
         # Prefix/substring match
-        for cand in candidates:
-            if cleaned_lower.startswith(cand.lower()) or cand.lower().startswith(cleaned_lower):
+        for cand in action_candidates:
+            if cleaned_lower.startswith(cand.lower()) or cand.lower().startswith(
+                cleaned_lower
+            ):
                 return cand
         # Fallback to first candidate
-        return candidates[0]
+        return action_candidates[0]
 
     def _init_memory(self) -> None:
         self.memory_store = GraphStore()
         self.grounder = Grounder(self.memory_store)
         self.memory = self.memory_store
 
-    def _naive_extract(self, observation: str, history: List[str], turn_id: int) -> ExtractionResult:
+    def _naive_extract(
+        self, observation: str, history: List[str], turn_id: int
+    ) -> ExtractionResult:
         """Lightweight heuristic extractor mirroring the smoke test."""
         entities: List[ExtractedEntity] = []
         relations: List[ExtractedRelation] = []
@@ -200,7 +209,9 @@ class LLMAgent(BaseAgent):
                 idx = lowered.find(token, start)
                 if idx == -1:
                     break
-                chunk = observation[idx + len(token) :].split(",")[0].split(".")[0].strip()
+                chunk = (
+                    observation[idx + len(token) :].split(",")[0].split(".")[0].strip()
+                )
                 chunk = " ".join(chunk.split()[:3])
                 add_entity(chunk, "object", 0.45)
                 start = idx + len(token)
