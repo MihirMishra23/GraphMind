@@ -34,6 +34,8 @@ def export_worldkg_dot(world: WorldKG, dot_path: Path, png_path: Optional[Path] 
         lines.append(f'  "{src}" -> "{dst}" [label="{edge_label}"];')
 
     lines.append("}")
+    dot_path = dot_path.resolve()
+    dot_path.parent.mkdir(parents=True, exist_ok=True)
     dot_path.write_text("\n".join(lines))
 
     # Optional PNG render using GraphViz if available.
@@ -43,6 +45,7 @@ def export_worldkg_dot(world: WorldKG, dot_path: Path, png_path: Optional[Path] 
             logging.warning("GraphViz `dot` binary not found; skipping PNG render.")
             return
         png_target = png_path if png_path.suffix else png_path.with_suffix(".png")
+        Path(png_target).parent.mkdir(parents=True, exist_ok=True)
         subprocess.run([dot_bin, "-Tpng", str(dot_path), "-o", str(png_target)], check=False)
 
 
