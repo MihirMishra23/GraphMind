@@ -115,7 +115,7 @@ class LLMAgent(BaseAgent):
         """Visualize the current graph memory if enabled."""
         if not self.memory_store:
             return None
-        return export_graphviz(
+        export_graphviz(
             self.memory_store,
             dot_path,
             include_inactive=include_inactive,

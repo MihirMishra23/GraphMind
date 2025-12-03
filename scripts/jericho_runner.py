@@ -210,8 +210,14 @@ def main() -> None:
             device_map=args.device_map,
             dtype=args.dtype,
         )
-
-    agent = build_agent(args.agent, args=args, llm_client=shared_llm)
+        agent = build_agent(args.agent, args=args, llm_client=shared_llm)
+    elif args.agent == "walkthrough":
+        agent = build_agent(
+            args.agent,
+            args=args,
+            llm_client=shared_llm,
+            walkthrough=env.get_walkthrough(),
+        )
 
     trajectory = run_episode(
         env,

@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import argparse
-from typing import Optional
+from typing import Optional, List
 
 import torch
 
@@ -25,11 +25,16 @@ def resolve_device_map(requested: str) -> str:
     return "cpu"
 
 
+# TODO: for the walkthroughagent add an additional argument called walkthrough that's a model parameter and is passed in as input to walkthroughagent
 def build_agent(
-    name: str, args: argparse.Namespace, llm_client: Optional[LLM]
+    name: str,
+    args: argparse.Namespace,
+    llm_client: Optional[LLM],
+    walkthrough: Optional[List] = None,
 ) -> BaseAgent:
     if name == "walkthrough":
-        return WalkthroughAgent()
+        assert walkthrough
+        return WalkthroughAgent(walkthrough)
     if name == "llm":
         if llm_client is None:
             device_map = resolve_device_map(args.device_map)
