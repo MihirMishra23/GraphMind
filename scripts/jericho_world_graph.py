@@ -14,8 +14,8 @@ SRC_PATH = PROJECT_ROOT / "src"
 if str(SRC_PATH) not in sys.path:
     sys.path.insert(0, str(SRC_PATH))
 
-from memory import GraphStore  # type: ignore
-from tools import export_graphviz  # type: ignore
+from memory.schema import EdgeType, NodeType, WorldKG  # type: ignore
+from memory.visualization import export_worldkg_dot  # type: ignore
 
 try:
     from jericho import FrotzEnv
@@ -105,9 +105,9 @@ def _scalar_properties(raw: Any) -> Dict[str, Any]:
     return props
 
 
-def build_graph_from_world(world: Any) -> GraphStore:
-    """Convert the output of `get_world_objects` into a GraphStore."""
-    store = GraphStore()
+def build_graph_from_world(world: Any) -> WorldKG:
+    """Convert the output of `get_world_objects` into a WorldKG."""
+    kg = WorldKG()
     items = _iter_world_objects(world)
 
     # First pass: create nodes for every known object.
@@ -117,10 +117,16 @@ def build_graph_from_world(world: Any) -> GraphStore:
             continue
         obj_id = str(_get_field(raw, "id", "object_id", "obj_id", "num") or key)
         name = _get_field(raw, "name", "object", "object_name", "shortname", "vocab", "num")
-        aliases = [str(name)] if name else [obj_id]
         props = _scalar_properties(raw)
-        node = store.add_node(node_type="world_object", aliases=aliases, properties=props)
-        id_to_node[obj_id] = node.node_id
+        node_id = kg.add_or_get_entity(
+            canonical_id=obj_id,
+            node_type=NodeType.OBJECT.value,
+            name=str(name) if name else obj_id,
+        )
+        if props:
+            # Stash properties as a state blob for display.
+            kg.set_state(node_id, "props", props, step=0)
+        id_to_node[obj_id] = node_id
 
     # Second pass: add containment edges based on parent/child hints.
     seen_edges = set()
@@ -138,11 +144,10 @@ def build_graph_from_world(world: Any) -> GraphStore:
         if parent_id and parent_id != "0" and parent_id in id_to_node:
             edge_key = (parent_id, obj_id)
             if edge_key not in seen_edges:
-                store.add_edge(
-                    source=id_to_node[parent_id],
-                    target=node_id,
-                    rel_label="contains",
-                    provenance={"source": "world_model"},
+                kg.add_relation(
+                    id_to_node[obj_id],
+                    id_to_node[parent_id],
+                    EdgeType.IN.value,
                 )
                 seen_edges.add(edge_key)
 
@@ -152,15 +157,14 @@ def build_graph_from_world(world: Any) -> GraphStore:
             edge_key = (obj_id, child_id)
             if edge_key in seen_edges:
                 continue
-            store.add_edge(
-                source=node_id,
-                target=id_to_node[child_id],
-                rel_label="contains",
-                provenance={"source": "world_model"},
+            kg.add_relation(
+                id_to_node[child_id],
+                node_id,
+                EdgeType.IN.value,
             )
             seen_edges.add(edge_key)
 
-    return store
+    return kg
 
 
 def parse_args() -> argparse.Namespace:
@@ -185,11 +189,6 @@ def parse_args() -> argparse.Namespace:
         help="Optional path to render a PNG (requires `dot`). Defaults to DOT path with .png.",
     )
     parser.add_argument(
-        "--graphviz-include-inactive",
-        action="store_true",
-        help="Include inactive (closed) nodes/edges in GraphViz export.",
-    )
-    parser.add_argument(
         "--log-level",
         type=str,
         default="INFO",
@@ -205,18 +204,12 @@ def main() -> None:
     env = FrotzEnv(str(args.game), seed=args.seed)
     env.reset()
     world = env.get_world_objects()
-    store = build_graph_from_world(world)
+    kg = build_graph_from_world(world)
 
-    print(f"Graph has {len(store.nodes)} nodes and {len(store.edges)} edges")
+    print(f"Graph has {len(kg.graph.nodes)} nodes and {len(kg.graph.edges)} edges")
     if args.graphviz_dot:
         png_path = args.graphviz_png or args.graphviz_dot.with_suffix(".png")
-        export_graphviz(
-            store,
-            args.graphviz_dot,
-            include_inactive=args.graphviz_include_inactive,
-            render_png=True,
-            png_path=png_path,
-        )
+        export_worldkg_dot(kg, args.graphviz_dot, png_path)
         print(f"Wrote DOT to {args.graphviz_dot}")
         if Path(png_path).exists():
             print(f"Wrote PNG to {png_path}")
