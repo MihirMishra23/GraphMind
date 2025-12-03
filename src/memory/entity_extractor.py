@@ -1,8 +1,12 @@
 from __future__ import annotations
 
+import json
 import re
+import textwrap
 from dataclasses import dataclass
 from typing import Any, Dict, Optional
+
+from llm import LLM
 
 from .schema import WorldKG
 
@@ -17,7 +21,23 @@ class CandidateFact:
     confidence: float
 
 
-class NaiveEntityRelationExtractor:
+class EntityRelationExtractor:
+    """
+    Abstract extractor interface to produce candidate facts.
+    """
+
+    def extract(
+        self,
+        prev_obs: str | None,
+        action: str | None,
+        obs: str,
+        world_kg: WorldKG,
+        step: int,
+    ) -> list[CandidateFact]:
+        raise NotImplementedError
+
+
+class NaiveEntityRelationExtractor(EntityRelationExtractor):
     """
     Lightweight, deterministic extractor for text-based game observations.
     """
@@ -100,7 +120,9 @@ class NaiveEntityRelationExtractor:
         parts = re.split(r",| and ", cleaned)
         return [p.strip() for p in parts if p.strip()]
 
-    def _extract_inventory(self, obs: str, room_name: Optional[str]) -> list[CandidateFact]:
+    def _extract_inventory(
+        self, obs: str, room_name: Optional[str]
+    ) -> list[CandidateFact]:
         facts: list[CandidateFact] = []
         lines = obs.splitlines()
         inventory_start = None
@@ -140,7 +162,9 @@ class NaiveEntityRelationExtractor:
             )
         return facts
 
-    def _extract_seen_objects(self, obs_lines: list[str], room_name: Optional[str]) -> list[CandidateFact]:
+    def _extract_seen_objects(
+        self, obs_lines: list[str], room_name: Optional[str]
+    ) -> list[CandidateFact]:
         facts: list[CandidateFact] = []
         for line in obs_lines:
             for pattern in self.see_patterns:
@@ -150,7 +174,9 @@ class NaiveEntityRelationExtractor:
                 items_text = match.group(1)
                 items = self._split_items(items_text)
                 for item in items:
-                    item_clean = re.sub(r"\bhere\b", "", item, flags=re.IGNORECASE).strip()
+                    item_clean = re.sub(
+                        r"\bhere\b", "", item, flags=re.IGNORECASE
+                    ).strip()
                     facts.append(
                         CandidateFact(
                             subj_text=item_clean,
@@ -210,12 +236,16 @@ class NaiveEntityRelationExtractor:
             )
         return facts
 
-    def _extract_from_action(self, action: Optional[str], room_name: Optional[str]) -> list[CandidateFact]:
+    def _extract_from_action(
+        self, action: Optional[str], room_name: Optional[str]
+    ) -> list[CandidateFact]:
         if not action:
             return []
         facts: list[CandidateFact] = []
         action_lower = action.lower()
-        take_match = re.search(r"(take|pick up|grab)\s+(?P<item>[\w\s'-]+)", action_lower)
+        take_match = re.search(
+            r"(take|pick up|grab)\s+(?P<item>[\w\s'-]+)", action_lower
+        )
         if take_match:
             item = take_match.group("item").strip()
             facts.append(
@@ -277,7 +307,9 @@ class NaiveEntityRelationExtractor:
     def _extract_notes(self, obs_lines: list[str]) -> list[CandidateFact]:
         facts: list[CandidateFact] = []
         for line in obs_lines:
-            match = re.search(r"\b(note|clue|message):?\s+(?P<content>.+)", line, re.IGNORECASE)
+            match = re.search(
+                r"\b(note|clue|message):?\s+(?P<content>.+)", line, re.IGNORECASE
+            )
             if not match:
                 continue
             content = match.group("content").strip()
@@ -293,7 +325,9 @@ class NaiveEntityRelationExtractor:
             )
         return facts
 
-    def _extract_entity_mentions(self, obs: str, world_kg: WorldKG) -> list[CandidateFact]:
+    def _extract_entity_mentions(
+        self, obs: str, world_kg: WorldKG
+    ) -> list[CandidateFact]:
         """
         Mark mentions of known entities to help retrieval. Uses simple substring
         matches against existing node names.
@@ -318,14 +352,18 @@ class NaiveEntityRelationExtractor:
         return facts
 
 
-class LLMEntityRelationExtractor:
+class LLMEntityRelationExtractor(EntityRelationExtractor):
     """
-    Placeholder LLM-based extractor.
+    LLM-based extractor.
     """
 
-    def __init__(self):
-        # TODO: Inject LLM client and prompt templates here.
-        ...
+    def __init__(
+        self,
+        llm: LLM,
+        max_tokens: int = 256,
+    ):
+        self.llm = llm
+        self.max_tokens = max_tokens
 
     def extract(
         self,
@@ -335,7 +373,69 @@ class LLMEntityRelationExtractor:
         world_kg: WorldKG,
         step: int,
     ) -> list[CandidateFact]:
-        # TODO: Use an LLM to propose CandidateFacts, possibly seeding with
-        # the naive extractor output and then refining.
-        # TODO: Incorporate world_kg context (nearby entities, prior states).
-        raise NotImplementedError("LLM-based extractor not implemented yet.")
+        prompt = self._build_prompt(prev_obs, action, obs)
+        completion = self.llm.generate(
+            prompt,
+            max_tokens=self.max_tokens,
+            stop=None,
+        )
+        return self._parse_completion(completion)
+
+    # ------------------------------------------------------------------ #
+    # Internal helpers
+    # ------------------------------------------------------------------ #
+    def _build_prompt(self, prev_obs: str | None, action: str | None, obs: str) -> str:
+        prev_block = prev_obs if prev_obs else "None"
+        action_block = action if action else "None"
+        template = textwrap.dedent(
+            """
+            You read observations and propose structured facts about the world.
+            Return a JSON array of objects with keys:
+              subj_text (string), rel_type (IN|HAS|ON|STATE|MENTIONS|CONNECTED_TO),
+              obj_text (string or null), state_updates (object), source ("obs"|"action"),
+              confidence (0-1).
+
+            Previous observation: {prev_obs}
+            Previous action: {action}
+            Current observation: {obs}
+
+            JSON:
+            """
+        ).strip()
+        return template.format(prev_obs=prev_block, action=action_block, obs=obs)
+
+    def _parse_completion(self, completion: str) -> list[CandidateFact]:
+        """Parse a JSON array from the LLM; fall back to empty on errors."""
+        try:
+            data = json.loads(completion.strip())
+        except Exception:
+            return []
+
+        facts: list[CandidateFact] = []
+        if not isinstance(data, list):
+            return facts
+
+        for entry in data:
+            if not isinstance(entry, dict):
+                continue
+            subj = entry.get("subj_text")
+            rel = entry.get("rel_type")
+            obj = entry.get("obj_text")
+            state_updates = entry.get("state_updates") or {}
+            source = entry.get("source") or "obs"
+            confidence = float(entry.get("confidence", 0.5))
+            if not subj or not rel:
+                continue
+            facts.append(
+                CandidateFact(
+                    subj_text=str(subj),
+                    rel_type=str(rel),
+                    obj_text=str(obj) if obj is not None else None,
+                    state_updates=(
+                        state_updates if isinstance(state_updates, dict) else {}
+                    ),
+                    source=str(source),
+                    confidence=max(0.0, min(1.0, confidence)),
+                )
+            )
+        return facts
