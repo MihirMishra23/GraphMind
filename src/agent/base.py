@@ -4,6 +4,7 @@ from __future__ import annotations
 from abc import ABC, abstractmethod
 from pathlib import Path
 from typing import Any, Optional, Sequence
+import logging
 
 from memory.entity_extractor import (
     CandidateFact,
@@ -21,6 +22,7 @@ class BaseAgent(ABC):
 
     def __init__(self, use_memory: bool = True) -> None:
         self.use_memory = use_memory
+        self.logger = logging.getLogger(self.__class__.__name__)
         self.env = None
         self.world_kg: Optional[WorldKG] = None
         self.memory_manager: Optional[MemoryManager] = None
@@ -62,6 +64,10 @@ class BaseAgent(ABC):
             facts = self.extract_entities_and_relations(
                 self._prev_obs, action, observation
             )
+            if self.logger.isEnabledFor(logging.DEBUG):
+                self.logger.debug(
+                    "Extraction produced %d candidate facts at step %s", len(facts), turn_id
+                )
             self.memory_manager.decide_and_apply(facts, step=turn_id)
             if self.kg_snapshots:
                 self.kg_snapshots.store_snapshot(turn_id, self.world_kg)

@@ -27,10 +27,8 @@ class LLMAgent(BaseAgent):
         system_prompt: str = DEFAULT_SYSTEM_PROMPT,
         history_horizon: int = 5,
         max_tokens: int = 32,
-        temperature: float = 0.5,
         actions_key: str = "valid_actions",
-        extraction_max_tokens: int = 256,
-        extraction_temperature: float = 0.0,
+        extraction_max_tokens: int = 1024,
         extraction_mode: str = "llm",
     ) -> None:
         super().__init__(use_memory=memory_mode != "none")
@@ -39,10 +37,8 @@ class LLMAgent(BaseAgent):
         self.system_prompt = system_prompt
         self.history_horizon = history_horizon
         self.max_tokens = max_tokens
-        self.temperature = temperature
         self.actions_key = actions_key
         self.extraction_max_tokens = extraction_max_tokens
-        self.extraction_temperature = extraction_temperature
         self.extraction_mode = extraction_mode
         self._last_action: Optional[str] = None
         if self.use_memory and self.extraction_mode == "llm":

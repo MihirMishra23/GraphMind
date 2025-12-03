@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import re
 import textwrap
+import logging
 from dataclasses import dataclass
 from typing import Any, Dict, Optional
 
@@ -19,6 +20,9 @@ class CandidateFact:
     state_updates: Dict[str, Any]  # e.g. {"open": True}
     source: str  # "obs" or "action"
     confidence: float
+
+
+logger = logging.getLogger(__name__)
 
 
 class EntityRelationExtractor:
@@ -374,12 +378,25 @@ class LLMEntityRelationExtractor(EntityRelationExtractor):
         step: int,
     ) -> list[CandidateFact]:
         prompt = self._build_prompt(prev_obs, action, obs)
+        if logger.isEnabledFor(logging.DEBUG):
+            logger.debug("LLM extractor prompt (step %s):\n%s", step, prompt)
         completion = self.llm.generate(
             prompt,
             max_tokens=self.max_tokens,
-            stop=None,
+            stop=["\n\n", "\nReturn", "\nNext", "\nNote"],
         )
-        return self._parse_completion(completion)
+        if logger.isEnabledFor(logging.DEBUG):
+            logger.debug(
+                "LLM extractor completion (step %s, truncated): %s",
+                step,
+                completion[:500],
+            )
+        facts = self._parse_completion(completion)
+        if logger.isEnabledFor(logging.DEBUG):
+            logger.debug(
+                "LLM extractor parsed %d candidate facts at step %s", len(facts), step
+            )
+        return facts
 
     # ------------------------------------------------------------------ #
     # Internal helpers
@@ -390,7 +407,7 @@ class LLMEntityRelationExtractor(EntityRelationExtractor):
         template = textwrap.dedent(
             """
             You read observations and propose structured facts about the world.
-            Return a JSON array of objects with keys:
+            Return ONLY a JSON array of objects with keys:
               subj_text (string), rel_type (IN|HAS|ON|STATE|MENTIONS|CONNECTED_TO),
               obj_text (string or null), state_updates (object), source ("obs"|"action"),
               confidence (0-1).
@@ -399,16 +416,21 @@ class LLMEntityRelationExtractor(EntityRelationExtractor):
             Previous action: {action}
             Current observation: {obs}
 
-            JSON:
+            JSON array:
             """
         ).strip()
         return template.format(prev_obs=prev_block, action=action_block, obs=obs)
 
     def _parse_completion(self, completion: str) -> list[CandidateFact]:
         """Parse a JSON array from the LLM; fall back to empty on errors."""
+        raw = completion.strip()
+        if "[" in raw and "]" in raw:
+            raw = raw[raw.find("[") : raw.rfind("]") + 1]
         try:
-            data = json.loads(completion.strip())
+            data = json.loads(raw)
         except Exception:
+            if logger.isEnabledFor(logging.DEBUG):
+                logger.debug("Failed to parse LLM extractor completion as JSON")
             return []
 
         facts: list[CandidateFact] = []
