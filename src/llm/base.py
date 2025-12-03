@@ -13,7 +13,6 @@ class LLM(ABC):
         self,
         prompt: str,
         max_tokens: int = 64,
-        temperature: float = 0.7,
         stop: Optional[Iterable[str]] = None,
     ) -> str:
         """Generate a completion for the given prompt."""

@@ -7,6 +7,7 @@ from typing import List, Optional, Sequence
 from llm import LLM
 from memory.entity_extractor import CandidateFact, LLMEntityRelationExtractor
 from memory.schema import WorldKG
+from memory.visualization import export_worldkg_dot
 
 from .base import BaseAgent
 
@@ -61,12 +62,18 @@ class LLMAgent(BaseAgent):
     def act(self, observation: str, action_candidates: List[str]) -> Optional[str]:
         kg_text = self._build_kg_context(observation)
         recent_lines = self._get_recent_history_lines(self.history_horizon)
-        proposed = self.propose_action(observation, kg_text, recent_lines)
-        action = self._choose_from_candidates(proposed, action_candidates)
+        action = self.propose_action(
+            observation,
+            kg_text,
+            recent_lines,
+            action_candidates=action_candidates,
+        )
         self._last_action = action
         return action or "look"
 
-    def propose_action(self, obs: str, kg_text: str, recent_history: list[str]) -> str:
+    def propose_action(
+        self, obs: str, kg_text: str, recent_history: list[str], action_candidates: Optional[Sequence[str]] = None
+    ) -> str:
         history_block = (
             "\n".join(recent_history[-self.history_horizon :])
             if recent_history
@@ -85,7 +92,23 @@ class LLMAgent(BaseAgent):
             max_tokens=self.max_tokens,
             stop=["\n"],
         )
-        return completion.strip()
+        completion = completion.strip()
+        if not action_candidates:
+            return completion
+
+        lines = completion.splitlines()
+        cleaned = lines[0] if lines else ""
+        cleaned_lower = cleaned.lower()
+        # Exact match
+        for cand in action_candidates:
+            if cleaned_lower == cand.lower():
+                return cand
+        # Prefix/substring match
+        for cand in action_candidates:
+            if cleaned_lower.startswith(cand.lower()) or cand.lower().startswith(cleaned_lower):
+                return cand
+        # Fallback to first candidate
+        return action_candidates[0]
 
     def extract_entities_and_relations(
         self, prev_obs: str | None, action: str | None, obs: str
@@ -107,27 +130,10 @@ class LLMAgent(BaseAgent):
         include_inactive: bool = False,
         png_path: Optional[Path] = None,
     ) -> None:
-        """Placeholder for future visualization with the new KG-based memory."""
-        return None
-
-    def _choose_from_candidates(
-        self, completion: str, action_candidates: Sequence[str]
-    ) -> str:
-        lines = completion.strip().splitlines()
-        cleaned = lines[0] if lines else ""
-        cleaned_lower = cleaned.lower()
-        # Exact match
-        for cand in action_candidates:
-            if cleaned_lower == cand.lower():
-                return cand
-        # Prefix/substring match
-        for cand in action_candidates:
-            if cleaned_lower.startswith(cand.lower()) or cand.lower().startswith(
-                cleaned_lower
-            ):
-                return cand
-        # Fallback to first candidate
-        return action_candidates[0]
+        """Export the current WorldKG to DOT/PNG if memory is enabled."""
+        if not self.use_memory or not self.world_kg:
+            return None
+        export_worldkg_dot(self.world_kg, dot_path, png_path)
 
     # ------------------------------------------------------------------ #
     # Internal helpers

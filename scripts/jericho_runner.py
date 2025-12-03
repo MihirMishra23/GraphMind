@@ -140,12 +140,6 @@ def parse_args() -> argparse.Namespace:
         help="Max new tokens for LLM action generation",
     )
     parser.add_argument(
-        "--llm-temperature",
-        type=float,
-        default=0.5,
-        help="Sampling temperature for LLM agent",
-    )
-    parser.add_argument(
         "--memory-mode",
         type=str,
         default="none",
@@ -157,12 +151,6 @@ def parse_args() -> argparse.Namespace:
         type=int,
         default=256,
         help="Max new tokens for extraction LLM completions.",
-    )
-    parser.add_argument(
-        "--extract-temperature",
-        type=float,
-        default=0.0,
-        help="Sampling temperature for extraction LLM (0 for deterministic).",
     )
     parser.add_argument(
         "--graphviz-dot",
@@ -204,20 +192,16 @@ def main() -> None:
 
     env = FrotzEnv(str(args.game), seed=args.seed)
     shared_llm: Optional[LLM] = None
-    if args.agent == "llm":
-        shared_llm = LlamaLLM(
-            model_id=args.model_id,
-            device_map=args.device_map,
-            dtype=args.dtype,
-        )
-        agent = build_agent(args.agent, args=args, llm_client=shared_llm)
-    elif args.agent == "walkthrough":
+    if args.agent == "walkthrough":
         agent = build_agent(
             args.agent,
             args=args,
             llm_client=shared_llm,
             walkthrough=env.get_walkthrough(),
         )
+    else:
+        # For llm-based agents (llm, kg-llm), build_agent will create the LLM client if missing.
+        agent = build_agent(args.agent, args=args, llm_client=shared_llm)
 
     trajectory = run_episode(
         env,
