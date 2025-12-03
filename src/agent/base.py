@@ -3,7 +3,7 @@ from __future__ import annotations
 """Base classes for agent implementations."""
 from abc import ABC, abstractmethod
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any, Optional, Sequence
 
 from memory.entity_extractor import (
     CandidateFact,
@@ -27,7 +27,7 @@ class BaseAgent(ABC):
         self.entity_extractor: Optional[EntityRelationExtractor] = None
         self.kg_snapshots: Optional[KGSnapshots] = None
         self.retriever: Optional[KGRetriever] = None
-        self._recent_history: list[str] = []
+        self._recent_steps: list[dict[str, str]] = []
         self._last_step: Optional[int] = None
         self._prev_obs: Optional[str] = None
         if self.use_memory:
@@ -36,7 +36,7 @@ class BaseAgent(ABC):
     def reset(self, env: Any) -> None:
         """Attach environment and reset memory if provided."""
         self.env = env
-        self._recent_history.clear()
+        self._recent_steps.clear()
         self._last_step = None
         self._prev_obs = None
         if self.use_memory:
@@ -56,7 +56,7 @@ class BaseAgent(ABC):
         """
         self._last_step = turn_id
         if action:
-            self._recent_history.append(f"{action} -> {observation}")
+            self._recent_steps.append({"action": action, "observation": observation})
 
         if self.use_memory and self.memory_manager and self.world_kg:
             facts = self.extract_entities_and_relations(
@@ -77,7 +77,9 @@ class BaseAgent(ABC):
         """Optional visualization hook; overridden by agents that own graph memory."""
         return None
 
-    def propose_action(self, obs: str, kg_text: str, recent_history: list[str]) -> str:
+    def propose_action(
+        self, obs: str, kg_text: str, recent_history: list[str], action_candidates: Optional[Sequence[str]] = None
+    ) -> str:
         """
         Suggest the next action given the observation and memory context.
         Subclasses should override; default raises to surface unexpected usage.
@@ -111,3 +113,14 @@ class BaseAgent(ABC):
         self.entity_extractor = NaiveEntityRelationExtractor()
         self.kg_snapshots = KGSnapshots()
         self.retriever = KGRetriever(self.world_kg)
+
+    def _get_recent_history_lines(self, horizon: int) -> list[str]:
+        """
+        Return structured recent history lines up to the provided horizon,
+        alternating Action/Observation entries.
+        """
+        lines: list[str] = []
+        for step in self._recent_steps[-horizon:]:
+            lines.append(f"Action: {step['action']}")
+            lines.append(f"Observation: {step['observation']}")
+        return lines

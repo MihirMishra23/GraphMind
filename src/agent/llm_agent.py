@@ -13,6 +13,7 @@ from .base import BaseAgent
 
 
 DEFAULT_SYSTEM_PROMPT = """You are controlling a player in a parser-based text adventure game.
+The goal is to complete the game in as few steps as possible.
 You receive the latest observation from the game and a short history of recent actions.
 Reply with a single valid game command (e.g., 'open door', 'get lamp', 'north').
 Do not include explanations or quotes, only the command text."""
@@ -68,11 +69,16 @@ class LLMAgent(BaseAgent):
             recent_lines,
             action_candidates=action_candidates,
         )
+        action = self._avoid_recent_repeat(action, action_candidates)
         self._last_action = action
         return action or "look"
 
     def propose_action(
-        self, obs: str, kg_text: str, recent_history: list[str], action_candidates: Optional[Sequence[str]] = None
+        self,
+        obs: str,
+        kg_text: str,
+        recent_history: list[str],
+        action_candidates: Optional[Sequence[str]] = None,
     ) -> str:
         history_block = (
             "\n".join(recent_history[-self.history_horizon :])
@@ -105,10 +111,28 @@ class LLMAgent(BaseAgent):
                 return cand
         # Prefix/substring match
         for cand in action_candidates:
-            if cleaned_lower.startswith(cand.lower()) or cand.lower().startswith(cleaned_lower):
+            if cleaned_lower.startswith(cand.lower()) or cand.lower().startswith(
+                cleaned_lower
+            ):
                 return cand
         # Fallback to first candidate
         return action_candidates[0]
+
+    def _avoid_recent_repeat(
+        self, action: str, action_candidates: Sequence[str]
+    ) -> str:
+        """
+        Heuristic to break out of short loops: if the model keeps repeating the
+        same action in the last few turns, pick the next available candidate.
+        """
+        if not action_candidates:
+            return action
+        recent_actions = [step["action"] for step in self._recent_steps[-2:]]
+        if recent_actions and all(a.lower() == action.lower() for a in recent_actions):
+            for cand in action_candidates:
+                if cand.lower() != action.lower():
+                    return cand
+        return action
 
     def extract_entities_and_relations(
         self, prev_obs: str | None, action: str | None, obs: str

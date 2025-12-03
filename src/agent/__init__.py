@@ -10,6 +10,7 @@ import torch
 from llm import LLM, LlamaLLM
 from .base import BaseAgent
 from .llm_agent import LLMAgent
+from .kg_llm_agent import KGLLMAgent
 from .walkthrough_agent import WalkthroughAgent
 
 
@@ -46,10 +47,23 @@ def build_agent(
         return LLMAgent(
             llm=llm_client,
             max_tokens=args.llm_max_tokens,
-            temperature=args.llm_temperature,
             memory_mode=args.memory_mode,
             extraction_max_tokens=args.extract_max_tokens,
-            extraction_temperature=args.extract_temperature,
+            extraction_mode=args.extraction_mode,
+        )
+    if name in {"kg-llm", "llm-kg"}:
+        if llm_client is None:
+            device_map = resolve_device_map(args.device_map)
+            llm_client = LlamaLLM(
+                model_id=args.model_id,
+                device_map=device_map,
+                dtype=args.dtype,
+            )
+        return KGLLMAgent(
+            llm=llm_client,
+            max_tokens=args.llm_max_tokens,
+            memory_mode=args.memory_mode,
+            extraction_max_tokens=args.extract_max_tokens,
             extraction_mode=args.extraction_mode,
         )
 
@@ -60,6 +74,7 @@ __all__ = [
     "BaseAgent",
     "WalkthroughAgent",
     "LLMAgent",
+    "KGLLMAgent",
     "build_agent",
     "resolve_device_map",
 ]
