@@ -53,7 +53,9 @@ class LLMAgent(BaseAgent):
 
     def propose_action(self, obs: str, kg_text: str, recent_history: list[str]) -> str:
         history_block = (
-            "\n".join(recent_history[-self.history_horizon :]) if recent_history else "None"
+            "\n".join(recent_history[-self.history_horizon :])
+            if recent_history
+            else "None"
         )
         kg_block = kg_text.strip() if kg_text.strip() else "None"
         prompt = (
@@ -66,7 +68,6 @@ class LLMAgent(BaseAgent):
         completion = self.llm.generate(
             prompt,
             max_tokens=self.max_tokens,
-            temperature=self.temperature,
             stop=["\n"],
         )
         return completion.strip()
@@ -118,5 +119,7 @@ class LLMAgent(BaseAgent):
         if not self.use_memory or not self.retriever or not self.world_kg:
             return ""
         step = self._last_step if self._last_step is not None else 0
-        subgraph: WorldKG = self.retriever.get_relevant_subgraph(observation, step=step, radius=2)
+        subgraph: WorldKG = self.retriever.get_relevant_subgraph(
+            observation, step=step, radius=2
+        )
         return subgraph.to_text_summary()
