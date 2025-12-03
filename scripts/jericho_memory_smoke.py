@@ -14,18 +14,14 @@ SRC_PATH = PROJECT_ROOT / "src"
 if str(SRC_PATH) not in sys.path:
     sys.path.insert(0, str(SRC_PATH))
 
-from agent import WalkthroughAgent  # type: ignore
-from memory.entity_extractor import NaiveEntityRelationExtractor  # type: ignore
-from memory.kg_store import KGSnapshots  # type: ignore
-from memory.memory_manager import MemoryManager  # type: ignore
-from memory.schema import WorldKG  # type: ignore
+from agent import WalkthroughAgent
+from memory.entity_extractor import NaiveEntityRelationExtractor
+from memory.kg_store import KGSnapshots
+from memory.memory_manager import MemoryManager
+from memory.schema import WorldKG
+from memory.visualization import export_worldkg_dot
 
-try:
-    from jericho import FrotzEnv
-except ImportError as exc:  # pragma: no cover - environment dependency
-    raise SystemExit(
-        "Jericho is not installed. Please install with `pip install jericho` before running."
-    ) from exc
+from jericho import FrotzEnv
 
 
 def summarize_world(world: WorldKG) -> None:
@@ -68,6 +64,18 @@ def parse_args() -> argparse.Namespace:
         "--quiet",
         action="store_true",
         help="Suppress per-step prints (still summarizes graph at end)",
+    )
+    parser.add_argument(
+        "--graphviz-dot",
+        type=Path,
+        default=None,
+        help="Optional path to write GraphViz DOT export of the WorldKG.",
+    )
+    parser.add_argument(
+        "--graphviz-png",
+        type=Path,
+        default=None,
+        help="Optional path to render PNG via GraphViz `dot`. If omitted, uses DOT path with .png.",
     )
     parser.add_argument(
         "--log-level",
@@ -117,6 +125,9 @@ def main() -> None:
             break
 
     summarize_world(world_kg)
+    if args.graphviz_dot:
+        png_target = args.graphviz_png or args.graphviz_dot.with_suffix(".png")
+        export_worldkg_dot(world_kg, args.graphviz_dot, png_target)
 
 
 if __name__ == "__main__":
