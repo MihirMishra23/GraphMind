@@ -23,7 +23,6 @@ from .base import BaseAgent
 DEFAULT_SYSTEM_PROMPT = """You are controlling a player in a parser-based text adventure game.
 You receive the latest observation from the game and a short history of recent actions.
 Reply with a single valid game command (e.g., 'open door', 'get lamp', 'north').
-If you are unsure, prefer exploratory but safe actions like 'look' or checking inventory with 'inventory'.
 Do not include explanations or quotes, only the command text."""
 
 
@@ -76,7 +75,8 @@ class LLMAgent(BaseAgent):
             max_tokens=self.max_tokens,
             stop=["\n"],
         )
-        print(f"{completion=}")
+        # print(f"{prompt=}")
+        # print(f"{completion=}")
         action = self._choose_from_candidates(completion, action_candidates)
         self._push_history(action, observation)
         return action or "look"
@@ -212,7 +212,7 @@ class LLMAgent(BaseAgent):
                     observation[idx + len(token) :].split(",")[0].split(".")[0].strip()
                 )
                 chunk = " ".join(chunk.split()[:3])
-                add_entity(chunk, "object", 0.45)
+                add_entity(chunk, "entity", 0.45)
                 start = idx + len(token)
 
         if location_name:

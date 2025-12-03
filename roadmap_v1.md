@@ -20,7 +20,7 @@ GraphMind augments LLM agents with a property-graph memory and an RL-guided poli
 - Implement operations: add_node/edge, update (close interval + new edge), delete (mark contradicted/close interval), alias merge (union-find), active view vs history view helpers.
 
 ## 2) Extraction & Grounding
-- Implement `memory/extraction.py`: LLaMA IE prompt + parser emitting entities/events/relations/preferences with confidence/time.
+- Implement `memory/extraction.py`: LLaMA IE prompt + parser emitting entities/events/relations with confidence/time.
 - Few-shot Jericho examples for prompt; include implicit preference hints.
 - Grounding module: lexical + embedding matching; threshold τ; create new nodes if distance > τ; maintain alias clusters.
 

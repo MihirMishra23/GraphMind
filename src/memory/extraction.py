@@ -1,4 +1,5 @@
 """Extraction and grounding utilities for Jericho observations."""
+
 from __future__ import annotations
 
 import json
@@ -43,87 +44,54 @@ class ExtractedEvent:
 
 
 @dataclass
-class ExtractedPreference:
-    actor: str = "player"
-    slot: str = "goal"
-    value: str = ""
-    evidence: Optional[str] = None
-    confidence: float = 0.5
-    time: Optional[int] = None
-
-
-@dataclass
 class ExtractionResult:
     entities: List[ExtractedEntity] = field(default_factory=list)
     relations: List[ExtractedRelation] = field(default_factory=list)
     events: List[ExtractedEvent] = field(default_factory=list)
-    preferences: List[ExtractedPreference] = field(default_factory=list)
 
 
-EXTRACTION_PROMPT_HEADER = """You are an information extractor for parser-based games (Jericho).
+EXTRACTION_PROMPT_HEADER = """You are an information extractor for parser-based games.
 Read the recent action/observation pair and emit concise JSON capturing entities, relations,
-events, and player preferences. Prefer open-vocabulary labels over schemas.
+and events. Prefer open-vocabulary labels over schemas.
 
 Schema:
-- entities: name, type (location/object/person/etc), aliases, properties, confidence [0-1], time (turn id)
+- entities: name, type (location/entity/person/etc), aliases, properties, confidence [0-1], time (turn id)
 - relations: source, target, rel_label, evidence (short span), confidence [0-1], time
 - events: description, participants (entity names), properties (tense/status), confidence, time
-- preferences: actor (player or NPC), slot (goal/plan/risk), value, evidence, confidence, time
 
 Rules:
 - Only include facts grounded in the text; no speculation.
-- Capture implicit preferences (e.g., 'you are hungry' -> slot: need, value: food).
 - Keep names short and stable; reuse earlier entity strings when possible.
-- Output pure JSON with keys: entities, relations, events, preferences."""
+- Output pure JSON with keys: entities, relations, events."""
 
 FEW_SHOT_EXAMPLES = """
-Example 1:
+Example:
 History: ["look -> You are in the kitchen. A dusty table stands here.", "get lamp -> Taken."]
 Observation: "A closed wooden door leads north. You feel hungry."
 Output:
 {
   "entities": [
     {"name": "kitchen", "type": "location", "aliases": ["kitchen"], "confidence": 0.74},
-    {"name": "wooden door", "type": "object", "aliases": ["door"], "confidence": 0.62}
+    {"name": "wooden door", "type": "entity", "aliases": ["door"], "confidence": 0.62}
   ],
   "relations": [
     {"source": "kitchen", "target": "wooden door", "rel_label": "connects_north", "confidence": 0.55}
   ],
-  "events": [],
-  "preferences": [
-    {"actor": "player", "slot": "need", "value": "find food soon", "evidence": "You feel hungry.", "confidence": 0.58}
-  ]
-}
-
-Example 2:
-History: ["open mailbox -> The mailbox contains a leaflet.", "read leaflet -> The leaflet says the grue hates light."]
-Observation: "A brass lamp lies here, unlit."
-Output:
-{
-  "entities": [
-    {"name": "brass lamp", "type": "object", "aliases": ["lamp"], "confidence": 0.78}
-  ],
-  "relations": [
-    {"source": "brass lamp", "target": "light source", "rel_label": "can_emit", "confidence": 0.51}
-  ],
-  "events": [
-    {"description": "lamp currently unlit", "participants": ["brass lamp"], "properties": {"state": "off"}, "confidence": 0.64}
-  ],
-  "preferences": [
-    {"actor": "player", "slot": "plan", "value": "light lamp to avoid grue", "evidence": "grue hates light", "confidence": 0.57}
-  ]
+  "events": []
 }
 """
 
 
-def build_extraction_prompt(observation: str, recent_history: Optional[List[str]] = None) -> str:
+def build_extraction_prompt(
+    observation: str, recent_history: Optional[List[str]] = None
+) -> str:
     """Construct a few-shot prompt for the LLaMA IE model."""
     history_text = "\n".join(recent_history or [])
     return (
         f"{EXTRACTION_PROMPT_HEADER}\n\n"
         f"{FEW_SHOT_EXAMPLES}\n"
         f"History: [{history_text}]\n"
-        f"Observation: \"{observation}\"\n"
+        f'Observation: "{observation}"\n'
         "Output JSON:"
     )
 
@@ -142,12 +110,13 @@ def parse_extraction_output(text: str) -> ExtractionResult:
     result.entities = _parse_entities(data.get("entities"))
     result.relations = _parse_relations(data.get("relations"))
     result.events = _parse_events(data.get("events"))
-    result.preferences = _parse_preferences(data.get("preferences"))
     return result
 
 
 def _extract_json_block(text: str) -> str:
-    fence_match = re.search(r"```(?:json)?(.*?)```", text, flags=re.DOTALL | re.IGNORECASE)
+    fence_match = re.search(
+        r"```(?:json)?(.*?)```", text, flags=re.DOTALL | re.IGNORECASE
+    )
     if fence_match:
         return fence_match.group(1).strip()
     brace_match = re.search(r"\{.*\}", text, flags=re.DOTALL)
@@ -172,7 +141,7 @@ def _parse_entities(raw: Any) -> List[ExtractedEntity]:
             name=name,
             type=_clean_str(item.get("type") or item.get("category")),
             aliases=aliases,
-            properties=item.get("properties") or {},
+            properties=_normalize_properties(item.get("properties")),
             embedding=embedding,
             confidence=_to_float(item.get("confidence"), 1.0),
             time=_to_int(item.get("time")),
@@ -221,36 +190,12 @@ def _parse_events(raw: Any) -> List[ExtractedEvent]:
             ExtractedEvent(
                 description=desc,
                 participants=participants,
-                properties=item.get("properties") or {},
+                properties=_normalize_properties(item.get("properties")),
                 confidence=_to_float(item.get("confidence"), 1.0),
                 time=_to_int(item.get("time")),
             )
         )
     return events
-
-
-def _parse_preferences(raw: Any) -> List[ExtractedPreference]:
-    prefs: List[ExtractedPreference] = []
-    if not isinstance(raw, list):
-        return prefs
-    for item in raw:
-        if not isinstance(item, dict):
-            continue
-        slot = _clean_str(item.get("slot") or item.get("type"))
-        value = _clean_str(item.get("value"))
-        if not value:
-            continue
-        prefs.append(
-            ExtractedPreference(
-                actor=_clean_str(item.get("actor")) or "player",
-                slot=slot or "goal",
-                value=value,
-                evidence=_clean_str(item.get("evidence")),
-                confidence=_to_float(item.get("confidence"), 0.5),
-                time=_to_int(item.get("time")),
-            )
-        )
-    return prefs
 
 
 def _parse_embedding(raw: Any) -> Optional[List[float]]:
@@ -283,12 +228,22 @@ def _clean_str(val: Any) -> str:
     return str(val).strip() if isinstance(val, str) else ""
 
 
+def _normalize_properties(raw: Any) -> Dict[str, Any]:
+    """Coerce loose LLM outputs into a property dict."""
+    if isinstance(raw, dict):
+        return raw
+    if isinstance(raw, list):
+        return {"items": raw}
+    if isinstance(raw, str):
+        return {"value": raw}
+    return {}
+
+
 @dataclass
 class GroundedUpdate:
     entity_nodes: Dict[str, str] = field(default_factory=dict)
     event_nodes: Dict[str, str] = field(default_factory=dict)
     relation_edges: List[str] = field(default_factory=list)
-    preference_nodes: List[str] = field(default_factory=list)
 
 
 class Grounder:
@@ -300,12 +255,16 @@ class Grounder:
         self.last_event_node: Optional[str] = None
 
     def ground(
-        self, extraction: ExtractionResult, turn_id: Optional[int] = None, action: Optional[str] = None
+        self,
+        extraction: ExtractionResult,
+        turn_id: Optional[int] = None,
+        action: Optional[str] = None,
     ) -> GroundedUpdate:
         entity_map = self._ground_entities(extraction.entities, turn_id)
         event_map = self._ground_events(extraction.events, entity_map, turn_id)
-        relation_edges = self._ground_relations(extraction.relations, entity_map, turn_id)
-        preference_nodes = self._ground_preferences(extraction.preferences, entity_map, turn_id)
+        relation_edges = self._ground_relations(
+            extraction.relations, entity_map, turn_id
+        )
 
         if action and event_map:
             current_event_id = next(iter(event_map.values()))
@@ -350,17 +309,22 @@ class Grounder:
             entity_nodes=entity_map,
             event_nodes=event_map,
             relation_edges=relation_edges,
-            preference_nodes=preference_nodes,
         )
 
-    def _ground_entities(self, entities: List[ExtractedEntity], turn_id: Optional[int]) -> Dict[str, str]:
+    def _ground_entities(
+        self, entities: List[ExtractedEntity], turn_id: Optional[int]
+    ) -> Dict[str, str]:
         mapping: Dict[str, str] = {}
         for ent in entities:
             aliases = [ent.name] + [a for a in ent.aliases if a]
             candidates: List[str] = []
             for alias in aliases:
                 candidates.extend(self.store.lookup_surface(alias))
-            roots = {self.store.find_root(cid) for cid in candidates} if candidates else set()
+            roots = (
+                {self.store.find_root(cid) for cid in candidates}
+                if candidates
+                else set()
+            )
 
             chosen: Optional[str] = None
             if roots:
@@ -421,13 +385,20 @@ class Grounder:
         return mapping
 
     def _ground_events(
-        self, events: List[ExtractedEvent], entity_map: Dict[str, str], turn_id: Optional[int]
+        self,
+        events: List[ExtractedEvent],
+        entity_map: Dict[str, str],
+        turn_id: Optional[int],
     ) -> Dict[str, str]:
         event_nodes: Dict[str, str] = {}
         for ev in events:
             # Reuse an existing event node if the description already exists as an alias.
             candidates = self.store.lookup_surface(ev.description)
-            roots = {self.store.find_root(cid) for cid in candidates} if candidates else set()
+            roots = (
+                {self.store.find_root(cid) for cid in candidates}
+                if candidates
+                else set()
+            )
             chosen: Optional[str] = None
             if roots:
                 chosen = next(iter(roots))
@@ -441,10 +412,15 @@ class Grounder:
                 )
 
             if chosen is None:
+                event_props = (
+                    ev.properties
+                    if isinstance(ev.properties, dict)
+                    else _normalize_properties(ev.properties)
+                )
                 node = self.store.add_node(
                     node_type="event",
                     aliases=[ev.description],
-                    properties={"description": ev.description, **ev.properties},
+                    properties={"description": ev.description, **event_props},
                     confidence=ev.confidence,
                     provenance={"source": "extraction"},
                     valid_from=turn_id if ev.time is None else ev.time,
@@ -469,12 +445,16 @@ class Grounder:
 
             event_nodes[ev.description] = node.node_id
             for participant in ev.participants:
-                src = entity_map.get(participant) or self._ensure_entity(participant, entity_map, turn_id)
+                src = entity_map.get(participant) or self._ensure_entity(
+                    participant, entity_map, turn_id
+                )
                 existing_edge = next(
                     (
                         e
                         for e in self.store.active_edges()
-                        if e.source == src and e.target == node.node_id and e.rel_label == "participates_in"
+                        if e.source == src
+                        and e.target == node.node_id
+                        and e.rel_label == "participates_in"
                     ),
                     None,
                 )
@@ -506,18 +486,29 @@ class Grounder:
         return event_nodes
 
     def _ground_relations(
-        self, relations: List[ExtractedRelation], entity_map: Dict[str, str], turn_id: Optional[int]
+        self,
+        relations: List[ExtractedRelation],
+        entity_map: Dict[str, str],
+        turn_id: Optional[int],
     ) -> List[str]:
         edges: List[str] = []
         for rel in relations:
-            source_id = entity_map.get(rel.source) or self._ensure_entity(rel.source, entity_map, turn_id)
-            target_id = entity_map.get(rel.target) or self._ensure_entity(rel.target, entity_map, turn_id)
+            source_id = entity_map.get(rel.source) or self._ensure_entity(
+                rel.source, entity_map, turn_id
+            )
+            target_id = entity_map.get(rel.target) or self._ensure_entity(
+                rel.target, entity_map, turn_id
+            )
             edge = self.store.add_edge(
                 source=source_id,
                 target=target_id,
                 rel_label=rel.rel_label,
                 confidence=rel.confidence,
-                provenance={"source": "extraction", "evidence": rel.evidence} if rel.evidence else {"source": "extraction"},
+                provenance=(
+                    {"source": "extraction", "evidence": rel.evidence}
+                    if rel.evidence
+                    else {"source": "extraction"}
+                ),
                 valid_from=turn_id if rel.time is None else rel.time,
             )
             edges.append(edge.edge_id)
@@ -532,46 +523,18 @@ class Grounder:
             )
         return edges
 
-    def _ground_preferences(
-        self, prefs: List[ExtractedPreference], entity_map: Dict[str, str], turn_id: Optional[int]
-    ) -> List[str]:
-        nodes: List[str] = []
-        for pref in prefs:
-            pref_node = self.store.add_node(
-                node_type="preference",
-                aliases=[f"{pref.slot}:{pref.value}"],
-                properties={"slot": pref.slot, "value": pref.value},
-                confidence=pref.confidence,
-                provenance={"source": "extraction", "evidence": pref.evidence} if pref.evidence else {"source": "extraction"},
-                valid_from=turn_id if pref.time is None else pref.time,
-            )
-            nodes.append(pref_node.node_id)
-            actor_id = entity_map.get(pref.actor) or self._ensure_entity(pref.actor, entity_map, turn_id)
-            self.store.add_edge(
-                source=actor_id,
-                target=pref_node.node_id,
-                rel_label=f"prefers::{pref.slot}",
-                confidence=pref.confidence,
-                provenance={"source": "extraction"},
-                valid_from=turn_id if pref.time is None else pref.time,
-            )
-            logger.debug(
-                "Created preference node %s for %s:%s and edge from actor %s (turn=%s)",
-                pref_node.node_id,
-                pref.slot,
-                pref.value,
-                actor_id,
-                turn_id if pref.time is None else pref.time,
-            )
-        return nodes
-
-    def _ensure_entity(self, name: str, entity_map: Dict[str, str], turn_id: Optional[int]) -> str:
+    def _ensure_entity(
+        self, name: str, entity_map: Dict[str, str], turn_id: Optional[int]
+    ) -> str:
         if name in entity_map:
             return entity_map[name]
         node = self.store.add_node(
             node_type="entity",
             aliases=[name],
-            provenance={"source": "extraction", "note": "auto-created for relation grounding"},
+            provenance={
+                "source": "extraction",
+                "note": "auto-created for relation grounding",
+            },
             valid_from=turn_id,
         )
         entity_map[name] = node.node_id

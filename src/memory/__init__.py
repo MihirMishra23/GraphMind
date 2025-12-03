@@ -3,7 +3,6 @@
 from .extraction import (
     ExtractedEntity,
     ExtractedEvent,
-    ExtractedPreference,
     ExtractedRelation,
     ExtractionResult,
     GroundedUpdate,
