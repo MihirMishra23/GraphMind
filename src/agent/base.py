@@ -5,7 +5,11 @@ from abc import ABC, abstractmethod
 from pathlib import Path
 from typing import Any, Optional
 
-from memory.entity_extractor import CandidateFact, NaiveEntityRelationExtractor
+from memory.entity_extractor import (
+    CandidateFact,
+    EntityRelationExtractor,
+    NaiveEntityRelationExtractor,
+)
 from memory.kg_store import KGSnapshots
 from memory.memory_manager import MemoryManager
 from memory.retriever import KGRetriever
@@ -20,7 +24,7 @@ class BaseAgent(ABC):
         self.env = None
         self.world_kg: Optional[WorldKG] = None
         self.memory_manager: Optional[MemoryManager] = None
-        self.entity_extractor: Optional[NaiveEntityRelationExtractor] = None
+        self.entity_extractor: Optional[EntityRelationExtractor] = None
         self.kg_snapshots: Optional[KGSnapshots] = None
         self.retriever: Optional[KGRetriever] = None
         self._recent_history: list[str] = []
@@ -55,14 +59,21 @@ class BaseAgent(ABC):
             self._recent_history.append(f"{action} -> {observation}")
 
         if self.use_memory and self.memory_manager and self.world_kg:
-            facts = self.extract_entities_and_relations(self._prev_obs, action, observation)
+            facts = self.extract_entities_and_relations(
+                self._prev_obs, action, observation
+            )
             self.memory_manager.decide_and_apply(facts, step=turn_id)
             if self.kg_snapshots:
                 self.kg_snapshots.store_snapshot(turn_id, self.world_kg)
 
         self._prev_obs = observation
 
-    def export_memory(self, dot_path: Path, include_inactive: bool = False, png_path: Optional[Path] = None) -> None:
+    def export_memory(
+        self,
+        dot_path: Path,
+        include_inactive: bool = False,
+        png_path: Optional[Path] = None,
+    ) -> None:
         """Optional visualization hook; overridden by agents that own graph memory."""
         return None
 
