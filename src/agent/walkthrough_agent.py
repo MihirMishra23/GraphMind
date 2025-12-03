@@ -7,8 +7,8 @@ from .base import BaseAgent
 
 
 class WalkthroughAgent(BaseAgent):
-    def __init__(self, walkthrough: List, memory: Optional[object] = None) -> None:
-        super().__init__(memory=memory)
+    def __init__(self, walkthrough: List, use_memory: bool = True) -> None:
+        super().__init__(use_memory=use_memory)
         self._actions: List[str] = []
         self._cursor: int = 0
         self.walkthrough = iter(walkthrough)
