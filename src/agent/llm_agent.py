@@ -5,7 +5,7 @@ from pathlib import Path
 from typing import List, Optional, Sequence
 
 from llm import LLM
-from memory.entity_extractor import CandidateFact
+from memory.entity_extractor import CandidateFact, LLMEntityRelationExtractor
 from memory.schema import WorldKG
 
 from .base import BaseAgent
@@ -43,10 +43,25 @@ class LLMAgent(BaseAgent):
         self.extraction_temperature = extraction_temperature
         self.extraction_mode = extraction_mode
         self._last_action: Optional[str] = None
+        if self.use_memory and self.extraction_mode == "llm":
+            self.entity_extractor = LLMEntityRelationExtractor(
+                llm=self.llm,
+                max_tokens=self.extraction_max_tokens,
+            )
+
+    def reset(self, env: object) -> None:
+        super().reset(env)
+        if self.use_memory and self.extraction_mode == "llm":
+            # Recreate the extractor to ensure fresh state and updated LLM settings per episode.
+            self.entity_extractor = LLMEntityRelationExtractor(
+                llm=self.llm,
+                max_tokens=self.extraction_max_tokens,
+            )
 
     def act(self, observation: str, action_candidates: List[str]) -> Optional[str]:
         kg_text = self._build_kg_context(observation)
-        proposed = self.propose_action(observation, kg_text, self._recent_history)
+        recent_lines = self._get_recent_history_lines(self.history_horizon)
+        proposed = self.propose_action(observation, kg_text, recent_lines)
         action = self._choose_from_candidates(proposed, action_candidates)
         self._last_action = action
         return action or "look"
@@ -75,9 +90,15 @@ class LLMAgent(BaseAgent):
     def extract_entities_and_relations(
         self, prev_obs: str | None, action: str | None, obs: str
     ) -> list[CandidateFact]:
-        """Use heuristic extraction unless disabled or overridden."""
+        """Use the configured extraction mode: llm or naive."""
         if not self.use_memory:
             return []
+        if self.extraction_mode == "llm" and isinstance(
+            self.entity_extractor, LLMEntityRelationExtractor
+        ):
+            return self.entity_extractor.extract(
+                prev_obs, action, obs, self.world_kg, step=self._last_step or 0
+            )
         return super().extract_entities_and_relations(prev_obs, action, obs)
 
     def export_memory(
