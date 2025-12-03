@@ -25,6 +25,10 @@ except ImportError as exc:  # pragma: no cover - environment dependency
         "Jericho is not installed. Please install with `pip install jericho` before running."
     ) from exc
 
+import os
+
+os.environ["TOKENIZERS_PARALLELISM"] = "false"
+
 
 def run_episode(
     env: FrotzEnv,
@@ -124,7 +128,7 @@ def parse_args() -> argparse.Namespace:
         help="Device map for HF model loading (auto|cuda|mps|cpu; auto prefers cuda>mps>cpu)",
     )
     parser.add_argument(
-        "--torch-dtype",
+        "--dtype",
         type=str,
         default="auto",
         help="Torch dtype for HF model loading (e.g., float16, bfloat16, auto)",
@@ -204,7 +208,7 @@ def main() -> None:
         shared_llm = LlamaLLM(
             model_id=args.model_id,
             device_map=args.device_map,
-            torch_dtype=args.torch_dtype,
+            dtype=args.dtype,
         )
 
     agent = build_agent(args.agent, args=args, llm_client=shared_llm)

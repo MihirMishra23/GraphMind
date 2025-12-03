@@ -13,16 +13,18 @@ class LlamaLLM(LLM):
         self,
         model_id: str = "meta-llama/Llama-3.2-3B-Instruct",
         device_map: str = "auto",
-        torch_dtype: str = "auto",
+        dtype: str = "auto",
         **kwargs,
     ) -> None:
         self.tokenizer = AutoTokenizer.from_pretrained(model_id)
         self.generator = pipeline(
             "text-generation",
-            model=AutoModelForCausalLM.from_pretrained(model_id, torch_dtype=torch_dtype, device_map=device_map),
+            model=AutoModelForCausalLM.from_pretrained(
+                model_id, dtype=dtype, device_map=device_map
+            ),
             tokenizer=self.tokenizer,
             device_map=device_map,
-            torch_dtype=torch_dtype,
+            dtype=dtype,
             **kwargs,
         )
 
@@ -30,14 +32,11 @@ class LlamaLLM(LLM):
         self,
         prompt: str,
         max_tokens: int = 64,
-        temperature: float = 0.7,
         stop: Optional[Iterable[str]] = None,
     ) -> str:
         outputs = self.generator(
             prompt,
             max_new_tokens=max_tokens,
-            temperature=temperature,
-            do_sample=temperature > 0,
             num_return_sequences=1,
             eos_token_id=self.tokenizer.eos_token_id,
             pad_token_id=self.tokenizer.eos_token_id,

@@ -74,9 +74,9 @@ class LLMAgent(BaseAgent):
         completion = self.llm.generate(
             prompt,
             max_tokens=self.max_tokens,
-            temperature=self.temperature,
             stop=["\n"],
         )
+        print(f"{completion=}")
         action = self._choose_from_candidates(completion, action_candidates)
         self._push_history(action, observation)
         return action or "look"
@@ -101,7 +101,6 @@ class LLMAgent(BaseAgent):
                 completion = self.llm.generate(
                     prompt,
                     max_tokens=self.extraction_max_tokens,
-                    temperature=self.extraction_temperature,
                     stop=None,
                 )
                 extraction = parse_extraction_output(completion)

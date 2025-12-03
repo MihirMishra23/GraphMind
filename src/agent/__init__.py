@@ -36,7 +36,7 @@ def build_agent(
             llm_client = LlamaLLM(
                 model_id=args.model_id,
                 device_map=device_map,
-                torch_dtype=args.torch_dtype,
+                dtype=args.dtype,
             )
         return LLMAgent(
             llm=llm_client,
