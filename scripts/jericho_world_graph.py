@@ -48,18 +48,31 @@ def _iter_world_objects(world: Any) -> List[Tuple[Any, Any]]:
         return list(world.items())
     if isinstance(world, list):
         return list(enumerate(world))
+    # Jericho returns a custom ZObject_Array_*; try common sequence protocols.
+    if hasattr(world, "__iter__") and not isinstance(world, (str, bytes)):
+        try:
+            return list(enumerate(world))
+        except Exception:
+            pass
+    if hasattr(world, "__len__") and hasattr(world, "__getitem__"):
+        try:
+            return [(i, world[i]) for i in range(len(world))]
+        except Exception:
+            pass
     raise TypeError(f"Unsupported world object container type: {type(world)}")
 
 
 def _child_ids(raw: Any) -> Iterable[str]:
     """Extract child identifiers from common Jericho fields."""
-    children = _get_field(raw, "children", "inventory", "contents", "objs")
+    children = _get_field(raw, "children", "inventory", "contents", "objs", "child")
     if children is None:
         return []
     if isinstance(children, dict):
         return [str(k) for k in children.keys()]
     if isinstance(children, (list, tuple, set)):
         return [str(c) for c in children]
+    if isinstance(children, (int, float)) and children == 0:
+        return []
     return [str(children)]
 
 
@@ -81,7 +94,7 @@ def _scalar_properties(raw: Any) -> Dict[str, Any]:
                 continue
             data[attr] = val
     for key, val in data.items():
-        if key in {"children", "inventory", "contents", "parent", "location", "objs"}:
+        if key in {"children", "inventory", "contents", "parent", "location", "objs", "child", "sibling"}:
             continue
         if isinstance(val, Scalar) or val is None:
             props[key] = val
@@ -100,8 +113,10 @@ def build_graph_from_world(world: Any) -> GraphStore:
     # First pass: create nodes for every known object.
     id_to_node: Dict[str, str] = {}
     for key, raw in items:
-        obj_id = str(_get_field(raw, "id", "object_id", "obj_id") or key)
-        name = _get_field(raw, "name", "object", "object_name", "shortname", "vocab")
+        if raw is None:
+            continue
+        obj_id = str(_get_field(raw, "id", "object_id", "obj_id", "num") or key)
+        name = _get_field(raw, "name", "object", "object_name", "shortname", "vocab", "num")
         aliases = [str(name)] if name else [obj_id]
         props = _scalar_properties(raw)
         node = store.add_node(node_type="world_object", aliases=aliases, properties=props)
@@ -110,15 +125,17 @@ def build_graph_from_world(world: Any) -> GraphStore:
     # Second pass: add containment edges based on parent/child hints.
     seen_edges = set()
     for key, raw in items:
-        obj_id = str(_get_field(raw, "id", "object_id", "obj_id") or key)
+        if raw is None:
+            continue
+        obj_id = str(_get_field(raw, "id", "object_id", "obj_id", "num") or key)
         node_id = id_to_node[obj_id]
 
         parent = _get_field(raw, "parent", "location", "loc", "owner")
         parent_id = None
         if parent is not None:
-            parent_id = str(_get_field(parent, "id", "object_id", "obj_id") or parent)
+            parent_id = str(_get_field(parent, "id", "object_id", "obj_id", "num") or parent)
 
-        if parent_id and parent_id in id_to_node:
+        if parent_id and parent_id != "0" and parent_id in id_to_node:
             edge_key = (parent_id, obj_id)
             if edge_key not in seen_edges:
                 store.add_edge(
