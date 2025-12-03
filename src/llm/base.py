@@ -1,12 +1,12 @@
 from __future__ import annotations
 
-"""Abstract interface for LLM clients."""
+"""Abstract interfaces for LLM clients."""
 from abc import ABC, abstractmethod
 from typing import Iterable, Optional
 
 
 class LLM(ABC):
-    """Base contract for text-generation models."""
+    """Base contract for raw text-generation models."""
 
     @abstractmethod
     def generate(
