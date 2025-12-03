@@ -77,6 +77,7 @@ class LLMAgent(BaseAgent):
             temperature=self.temperature,
             stop=["\n"],
         )
+        print(f"{completion=}")
         action = self._choose_from_candidates(completion, action_candidates)
         self._push_history(action, observation)
         return action or "look"
