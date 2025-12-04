@@ -408,9 +408,14 @@ class LLMEntityRelationExtractor(EntityRelationExtractor):
             """
             You read observations and propose structured facts about the world.
             Return ONLY a JSON array of objects with keys:
-              subj_text (string), rel_type (IN|HAS|ON|STATE|MENTIONS|CONNECTED_TO),
+              subj_text (string), rel_type (CONTAINS|ON|STATE|CONNECTED_TO),
               obj_text (string or null), state_updates (object), source ("obs"|"action"),
               confidence (0-1).
+
+            Example:
+            [
+              {{"subj_text": "mailbox", "rel_type": "CONTAINS", "obj_text": "leaflet", "state_updates": {{}}, "source": "obs", "confidence": 0.8}}
+            ]
 
             Previous observation: {prev_obs}
             Previous action: {action}
@@ -424,13 +429,16 @@ class LLMEntityRelationExtractor(EntityRelationExtractor):
     def _parse_completion(self, completion: str) -> list[CandidateFact]:
         """Parse a JSON array from the LLM; fall back to empty on errors."""
         raw = completion.strip()
-        if "[" in raw and "]" in raw:
-            raw = raw[raw.find("[") : raw.rfind("]") + 1]
-        try:
-            data = json.loads(raw)
-        except Exception:
+        payload = self._extract_json_array(raw)
+        if payload is None:
             if logger.isEnabledFor(logging.DEBUG):
                 logger.debug("Failed to parse LLM extractor completion as JSON")
+            return []
+        try:
+            data = json.loads(payload)
+        except Exception:
+            if logger.isEnabledFor(logging.DEBUG):
+                logger.debug("Failed to parse extracted JSON array")
             return []
 
         facts: list[CandidateFact] = []
@@ -461,3 +469,23 @@ class LLMEntityRelationExtractor(EntityRelationExtractor):
                 )
             )
         return facts
+
+    def _extract_json_array(self, text: str) -> Optional[str]:
+        """
+        Try to extract the first JSON array from the text, handling fenced code blocks.
+        """
+        import re
+
+        # Prefer fenced ```json ... ``` blocks.
+        fenced = re.findall(r"```json\\s*(\\[.*?\\])\\s*```", text, flags=re.DOTALL | re.IGNORECASE)
+        for block in fenced:
+            if block.strip():
+                return block.strip()
+
+        # Fallback: grab from first '[' to last ']'.
+        if "[" in text and "]" in text:
+            start = text.find("[")
+            end = text.rfind("]")
+            if end > start:
+                return text[start : end + 1].strip()
+        return None
