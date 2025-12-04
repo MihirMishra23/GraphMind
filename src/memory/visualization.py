@@ -13,7 +13,15 @@ def export_worldkg_dot(world: WorldKG, dot_path: Path, png_path: Optional[Path] 
     """
     Write a DOT representation of the WorldKG and optionally render to PNG via GraphViz `dot`.
     """
-    lines = ["digraph WorldKG {", "  rankdir=LR;"]
+    lines = [
+        "digraph WorldKG {",
+        # Prefer a more vertical layout to avoid extreme width.
+        "  rankdir=TB;",
+        "  nodesep=0.6;",
+        "  ranksep=0.9;",
+        '  node [fontsize=16];',
+        '  edge [fontsize=13];',
+    ]
 
     # Nodes
     for node_id, data in world.graph.nodes(data=True):
