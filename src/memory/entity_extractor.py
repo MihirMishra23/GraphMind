@@ -364,7 +364,7 @@ class LLMEntityRelationExtractor(EntityRelationExtractor):
     def __init__(
         self,
         llm: LLM,
-        max_tokens: int = 256,
+        max_tokens: int = 1024,
     ):
         self.llm = llm
         self.max_tokens = max_tokens
@@ -477,7 +477,9 @@ class LLMEntityRelationExtractor(EntityRelationExtractor):
         import re
 
         # Prefer fenced ```json ... ``` blocks.
-        fenced = re.findall(r"```json\\s*(\\[.*?\\])\\s*```", text, flags=re.DOTALL | re.IGNORECASE)
+        fenced = re.findall(
+            r"```json\\s*(\\[.*?\\])\\s*```", text, flags=re.DOTALL | re.IGNORECASE
+        )
         for block in fenced:
             if block.strip():
                 return block.strip()

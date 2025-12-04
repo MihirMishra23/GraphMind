@@ -31,7 +31,7 @@ class LlamaLLM(LLM):
     def generate(
         self,
         prompt: str,
-        max_tokens: int = 64,
+        max_tokens: int = 1024,
         stop: Optional[Iterable[str]] = None,
     ) -> str:
         outputs = self.generator(
@@ -41,6 +41,7 @@ class LlamaLLM(LLM):
             eos_token_id=self.tokenizer.eos_token_id,
             pad_token_id=self.tokenizer.eos_token_id,
             return_full_text=False,
+            do_sample=False,
         )
         text = outputs[0]["generated_text"]
         completion = text

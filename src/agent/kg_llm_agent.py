@@ -2,11 +2,13 @@ from __future__ import annotations
 
 """LLM agent that consumes a structured KG context to choose actions."""
 from typing import List, Optional, Sequence
+import re
 
 from llm import LLM
 from memory.schema import EdgeType, NodeType, WorldKG
 
 from .llm_agent import LLMAgent, DEFAULT_SYSTEM_PROMPT
+from .state_effect_model import StateEffectModel
 
 
 STRUCTURED_SYSTEM_PROMPT = """You control a player in a text adventure game.
@@ -30,10 +32,7 @@ class KGLLMAgent(LLMAgent):
         super().__init__(
             llm=llm, memory_mode=memory_mode, system_prompt=system_prompt, **kwargs
         )
-
-    def act(self, observation: str, action_candidates: List[str]) -> Optional[str]:
-        self._last_action_candidates = list(action_candidates)
-        return super().act(observation, action_candidates)
+        self.state_effect_model = StateEffectModel(llm)
 
     def propose_action(
         self,
@@ -83,6 +82,71 @@ class KGLLMAgent(LLMAgent):
     # ------------------------------------------------------------------ #
     # KG context helpers
     # ------------------------------------------------------------------ #
+    def _apply_naive_outcome_update(self, action: str, observation: str, step: int) -> None:
+        """
+        LLM-driven effect updates for terse result-only observations.
+        TODO: Replace with dedicated effect model; keep separate from episodic KG prompts.
+        """
+        if not self.world_kg or not self.memory_manager:
+            return
+        action_lower = action.strip().lower()
+        obs_clean = observation.strip().lower()
+        if not self._is_result_only_observation(obs_clean):
+            return
+
+        # Build a lightweight facts list for the effect model.
+        facts: list[dict] = [
+            {
+                "subj_text": f.subj_text,
+                "rel_type": f.rel_type,
+                "obj_text": f.obj_text,
+                "state_updates": f.state_updates,
+                "source": f.source,
+                "confidence": f.confidence,
+            }
+            for f in self.extract_entities_and_relations(None, action, observation)
+        ]
+        effects = self.state_effect_model.propose_effects(action_lower, observation, facts)
+
+        for eff in effects:
+            if not isinstance(eff, dict):
+                continue
+            op = eff.get("op")
+            target = eff.get("target")
+            state_updates = eff.get("state_updates") or {}
+            container = eff.get("container")
+            confidence = float(eff.get("confidence", 0.0))
+            if confidence < 0.4 or not target:
+                continue
+
+            if op == "add_inventory":
+                player_ref = self.memory_manager.canonicalizer.canonicalize_entity_text(
+                    "player", NodeType.PLAYER.value, step=step
+                ).canonical_id
+                obj_ref = self.memory_manager.canonicalizer.canonicalize_entity_text(
+                    target, NodeType.OBJECT.value, step=step
+                ).canonical_id
+                self.memory_manager._set_has(player_ref, obj_ref, step)
+
+            if op == "set_state":
+                obj_ref = self.memory_manager.canonicalizer.canonicalize_entity_text(
+                    target, NodeType.OBJECT.value, step=step
+                ).canonical_id
+                for key, value in (state_updates if isinstance(state_updates, dict) else {}).items():
+                    self.world_kg.set_state(obj_ref, key, value, step)
+
+            if op == "contains" and container:
+                cont_ref = self.memory_manager.canonicalizer.canonicalize_entity_text(
+                    container, NodeType.OBJECT.value, step=step
+                ).canonical_id
+                obj_ref = self.memory_manager.canonicalizer.canonicalize_entity_text(
+                    target, NodeType.OBJECT.value, step=step
+                ).canonical_id
+                try:
+                    self.world_kg.add_relation(cont_ref, obj_ref, EdgeType.CONTAINS.value)
+                except Exception:
+                    continue
+
     def _build_structured_context(self, observation: str) -> str:
         """
         Build a concise, structured view of the relevant KG neighborhood:

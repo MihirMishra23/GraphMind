@@ -12,8 +12,8 @@ from memory.visualization import export_worldkg_dot
 from .base import BaseAgent
 
 
-DEFAULT_SYSTEM_PROMPT = """You are controlling a player in a parser-based text adventure game.
-The goal is to complete the game in as few steps as possible.
+DEFAULT_SYSTEM_PROMPT = """You are a player in a text adventure game.
+The goal is to explore the game and collect rewards.
 You receive the latest observation from the game and a short history of recent actions.
 Reply with a single valid game command (e.g., 'open door', 'get lamp', 'north').
 Do not include explanations or quotes, only the command text."""
@@ -26,7 +26,6 @@ class LLMAgent(BaseAgent):
         memory_mode: str = "none",
         system_prompt: str = DEFAULT_SYSTEM_PROMPT,
         history_horizon: int = 5,
-        actions_key: str = "valid_actions",
         extraction_max_tokens: int = 1024,
         extraction_mode: str = "llm",
     ) -> None:
@@ -35,7 +34,6 @@ class LLMAgent(BaseAgent):
         self.memory_mode = memory_mode
         self.system_prompt = system_prompt
         self.history_horizon = history_horizon
-        self.actions_key = actions_key
         self.extraction_max_tokens = extraction_max_tokens
         self.extraction_mode = extraction_mode
         self._last_action: Optional[str] = None
@@ -55,7 +53,6 @@ class LLMAgent(BaseAgent):
             )
 
     def act(self, observation: str, action_candidates: List[str]) -> Optional[str]:
-        self._last_action_candidates = list(action_candidates)
         kg_text = self._build_kg_context(observation)
         recent_lines = self._get_recent_history_lines(self.history_horizon)
         action = self.propose_action(

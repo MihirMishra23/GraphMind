@@ -112,6 +112,15 @@ def main() -> None:
         observation, reward, done, info = env.step(action)
         facts = extractor.extract(prev_obs, action, observation, world_kg, step)
         # Record observation node and link it in manager.
+        # Reuse observation node if text matches a prior one; otherwise create new.
+        obs_node_id = None
+        for nid, data in world_kg.graph.nodes(data=True):
+            if data.get("type") == "OBSERVATION":
+                text = (data.get("state") or {}).get("text") or data.get("description") or ""
+                if text.strip().lower() == observation.strip().lower():
+                    obs_node_id = nid
+                    break
+        if obs_node_id is None:
         obs_node_id = f"obs_{step}"
         world_kg.add_or_get_entity(
             canonical_id=obs_node_id,

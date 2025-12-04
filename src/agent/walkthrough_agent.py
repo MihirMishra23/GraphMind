@@ -22,7 +22,6 @@ class WalkthroughAgent(BaseAgent):
         self._cursor = 0
 
     def act(self, observation: str, action_candidates: List[str]) -> Optional[str]:
-        self._last_action_candidates = list(action_candidates)
         if self._cursor < len(self._actions):
             action = self._actions[self._cursor]
             self._cursor += 1

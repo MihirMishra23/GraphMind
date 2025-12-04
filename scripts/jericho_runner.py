@@ -35,18 +35,56 @@ def run_episode(
     agent: BaseAgent,
     max_steps: int,
     verbose: bool = True,
+    manual: bool = False,
+    save_kg_path: Optional[Path] = None,
 ) -> List[Dict[str, Any]]:
     observation, info = env.reset()
     agent.reset(env)
     trajectory: List[Dict[str, Any]] = []
 
+    # Process initial observation before any actions to populate the KG.
+    agent.observe(
+        turn_id=-1,
+        action="start game",
+        observation=observation,
+        reward=0.0,
+        info=info,
+        next_action_candidates=env.get_valid_actions(),
+    )
+
     for step in range(max_steps):
-        action = agent.act(observation, env.get_valid_actions())
+        valid_actions = env.get_valid_actions()
+        if manual:
+            print("\n--- Manual step ---")
+            print(f"Observation:\n{observation}")
+            print("Valid actions:")
+            for a in valid_actions:
+                print(f"- {a}")
+            try:
+                action = input("Enter action: ").strip()
+            except EOFError:
+                action = ""
+            if not action:
+                break
+        else:
+            action = agent.act(observation, valid_actions)
         if action is None:
             break
 
         observation, reward, done, info = env.step(action)
-        agent.observe(step, action, observation, reward, info)
+        agent.observe(
+            step,
+            action,
+            observation,
+            reward,
+            info,
+            next_action_candidates=env.get_valid_actions(),
+        )
+        if save_kg_path and logging.getLogger().isEnabledFor(logging.DEBUG):
+            dot_path = save_kg_path.with_suffix(".dot")
+            png_path = save_kg_path.with_suffix(".png")
+            dot_path.parent.mkdir(parents=True, exist_ok=True)
+            agent.export_memory(dot_path, include_inactive=False, png_path=png_path)
 
         record = {
             "step": step,
@@ -94,6 +132,11 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument(
         "--agent", type=str, default="walkthrough", help="Agent type (walkthrough|llm)"
+    )
+    parser.add_argument(
+        "--manual",
+        action="store_true",
+        help="Bypass agent decisions and manually input actions each step.",
     )
     parser.add_argument(
         "--max-steps", type=int, default=400, help="Maximum steps to execute"
@@ -189,6 +232,8 @@ def main() -> None:
         agent,
         max_steps=args.max_steps,
         verbose=not args.quiet,
+        manual=args.manual,
+        save_kg_path=args.save_kg,
     )
     save_logs(args.text_log, args.json_log, trajectory)
     if args.save_kg:

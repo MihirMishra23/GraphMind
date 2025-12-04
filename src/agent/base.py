@@ -14,7 +14,7 @@ from memory.entity_extractor import (
 from memory.kg_store import KGSnapshots
 from memory.memory_manager import MemoryManager
 from memory.retriever import KGRetriever
-from memory.schema import WorldKG
+from memory.schema import WorldKG, NodeType
 
 
 class BaseAgent(ABC):
@@ -33,7 +33,6 @@ class BaseAgent(ABC):
         self._last_step: Optional[int] = None
         self._prev_obs: Optional[str] = None
         self._last_obs_node_id: Optional[str] = None
-        self._last_action_candidates: Optional[list[str]] = None
         if self.use_memory:
             self._init_memory_backend()
 
@@ -43,7 +42,6 @@ class BaseAgent(ABC):
         self._recent_steps.clear()
         self._last_step = None
         self._prev_obs = None
-        self._last_action_candidates = None
         if self.use_memory:
             self._init_memory_backend()
         self._last_obs_node_id = None
@@ -55,6 +53,7 @@ class BaseAgent(ABC):
         observation: str,
         reward: float,
         info: Optional[dict] = None,
+        next_action_candidates: Optional[list[str]] = None,
     ) -> None:
         """
         Hook for agents to record a completed step; updates the structured memory
@@ -66,7 +65,7 @@ class BaseAgent(ABC):
 
         if self.use_memory and self.memory_manager and self.world_kg:
             curr_obs_node = self._record_observation_transition(
-                action, observation, turn_id, action_candidates=self._last_action_candidates
+                action, observation, turn_id, action_candidates=next_action_candidates
             )
             facts = self.extract_entities_and_relations(
                 self._prev_obs, action, observation
@@ -76,6 +75,7 @@ class BaseAgent(ABC):
                     "Extraction produced %d candidate facts at step %s", len(facts), turn_id
                 )
             self.memory_manager.decide_and_apply(facts, step=turn_id, observation_node_id=curr_obs_node)
+            self._apply_naive_outcome_update(action, observation, turn_id)
             if self.kg_snapshots:
                 self.kg_snapshots.store_snapshot(turn_id, self.world_kg)
 
@@ -127,6 +127,12 @@ class BaseAgent(ABC):
         self.kg_snapshots = KGSnapshots()
         self.retriever = KGRetriever(self.world_kg)
         self._last_obs_node_id = None
+        # Ensure player entity exists in state graph.
+        self.world_kg.add_or_get_entity(
+            canonical_id="player",
+            node_type="PLAYER",
+            name="player",
+        )
 
     def _get_recent_history_lines(self, horizon: int) -> list[str]:
         """
@@ -149,6 +155,7 @@ class BaseAgent(ABC):
             return None
         if not action:
             action = "start game"
+        # Always create a fresh observation node per step to preserve episodic order.
         curr_node_id = f"obs_{step}"
         self.world_kg.add_or_get_entity(
             canonical_id=curr_node_id,
@@ -175,3 +182,17 @@ class BaseAgent(ABC):
                 ...
         self._last_obs_node_id = curr_node_id
         return curr_node_id
+
+    def _is_result_only_observation(self, obs_clean: str) -> bool:
+        """
+        Heuristic: very short outcome-only messages should not create new obs nodes.
+        """
+        short_tokens = obs_clean.split()
+        if len(short_tokens) <= 2:
+            return True
+        terse_set = {"taken.", "dropped.", "opened.", "closed.", "locked.", "unlocked."}
+        return obs_clean in terse_set
+
+    def _apply_naive_outcome_update(self, action: str, observation: str, step: int) -> None:
+        """Subclass hook: default no-op."""
+        return None

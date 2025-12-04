@@ -6,7 +6,7 @@ import subprocess
 from pathlib import Path
 from typing import Optional
 
-from memory.schema import WorldKG
+from memory.schema import WorldKG, NodeType, EdgeType
 
 
 def export_worldkg_dot(world: WorldKG, dot_path: Path, png_path: Optional[Path] = None) -> None:
@@ -17,21 +17,35 @@ def export_worldkg_dot(world: WorldKG, dot_path: Path, png_path: Optional[Path] 
 
     # Nodes
     for node_id, data in world.graph.nodes(data=True):
-        label_parts = [f"{node_id}", f"[{data.get('type')}] {data.get('name', node_id)}"]
+        ntype = data.get("type")
+        label_parts = [f"{node_id}", f"[{ntype}] {data.get('name', node_id)}"]
         state = data.get("state") or {}
-        if state:
-            state_txt = "\\n".join(f"{k}={v}" for k, v in state.items())
-            label_parts.append(state_txt)
+        # Special-case observation nodes to show actions.
+        if ntype == NodeType.OBSERVATION.value:
+            text = state.get("text") or data.get("description", "")
+            actions = state.get("actions") or []
+            if text:
+                label_parts.append(text.replace("\"", "'"))
+            if actions:
+                label_parts.append("actions: " + ", ".join(actions))
+            shape = "ellipse"
+            color = "#6baed6"
+        else:
+            if state:
+                state_txt = "\\n".join(f"{k}={v}" for k, v in state.items())
+                label_parts.append(state_txt)
+            shape = "box"
+            color = "#c7c7c7"
         label = "\\n".join(label_parts)
-        lines.append(f'  "{node_id}" [shape=box, label="{label}"];')
+        lines.append(f'  "{node_id}" [shape={shape}, style=filled, fillcolor="{color}", label="{label}"];')
 
     # Edges
     for src, dst, data in world.graph.edges(data=True):
         rel = data.get("type", "")
         edge_label = rel
-        if rel == "CONNECTED_TO" and data.get("direction"):
+        if rel == EdgeType.CONNECTED_TO.value and data.get("direction"):
             edge_label = f"{rel} ({data['direction']})"
-        if rel == "ACTION":
+        if rel == EdgeType.ACTION.value:
             edge_label = data.get("name") or data.get("command") or rel
         lines.append(f'  "{src}" -> "{dst}" [label="{edge_label}"];')
 
