@@ -31,6 +31,8 @@ def export_worldkg_dot(world: WorldKG, dot_path: Path, png_path: Optional[Path] 
         edge_label = rel
         if rel == "CONNECTED_TO" and data.get("direction"):
             edge_label = f"{rel} ({data['direction']})"
+        if rel == "ACTION":
+            edge_label = data.get("name") or data.get("command") or rel
         lines.append(f'  "{src}" -> "{dst}" [label="{edge_label}"];')
 
     lines.append("}")
