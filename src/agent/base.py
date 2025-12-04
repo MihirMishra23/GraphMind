@@ -32,6 +32,7 @@ class BaseAgent(ABC):
         self._recent_steps: list[dict[str, str]] = []
         self._last_step: Optional[int] = None
         self._prev_obs: Optional[str] = None
+        self._last_obs_node_id: Optional[str] = None
         if self.use_memory:
             self._init_memory_backend()
 
@@ -43,6 +44,7 @@ class BaseAgent(ABC):
         self._prev_obs = None
         if self.use_memory:
             self._init_memory_backend()
+        self._last_obs_node_id = None
 
     def observe(
         self,
@@ -61,6 +63,7 @@ class BaseAgent(ABC):
             self._recent_steps.append({"action": action, "observation": observation})
 
         if self.use_memory and self.memory_manager and self.world_kg:
+            curr_obs_node = self._record_observation_transition(action, observation, turn_id)
             facts = self.extract_entities_and_relations(
                 self._prev_obs, action, observation
             )
@@ -68,7 +71,7 @@ class BaseAgent(ABC):
                 self.logger.debug(
                     "Extraction produced %d candidate facts at step %s", len(facts), turn_id
                 )
-            self.memory_manager.decide_and_apply(facts, step=turn_id)
+            self.memory_manager.decide_and_apply(facts, step=turn_id, observation_node_id=curr_obs_node)
             if self.kg_snapshots:
                 self.kg_snapshots.store_snapshot(turn_id, self.world_kg)
 
@@ -119,6 +122,7 @@ class BaseAgent(ABC):
         self.entity_extractor = NaiveEntityRelationExtractor()
         self.kg_snapshots = KGSnapshots()
         self.retriever = KGRetriever(self.world_kg)
+        self._last_obs_node_id = None
 
     def _get_recent_history_lines(self, horizon: int) -> list[str]:
         """
@@ -130,3 +134,35 @@ class BaseAgent(ABC):
             lines.append(f"Action: {step['action']}")
             lines.append(f"Observation: {step['observation']}")
         return lines
+
+    def _record_observation_transition(self, action: str, observation: str, step: int) -> None:
+        """
+        Add observation nodes and an ACTION edge linking previous -> current observation.
+        """
+        if not self.world_kg:
+            return None
+        if not action:
+            action = "start game"
+        curr_node_id = f"obs_{step}"
+        self.world_kg.add_or_get_entity(
+            canonical_id=curr_node_id,
+            node_type="OBSERVATION",
+            name=curr_node_id,
+        )
+        self.world_kg.graph.nodes[curr_node_id]["description"] = observation
+        self.world_kg.graph.nodes[curr_node_id]["state"] = {"text": observation}
+        self.world_kg.graph.nodes[curr_node_id]["last_updated_step"] = step
+
+        if self._last_obs_node_id:
+            try:
+                self.world_kg.add_relation(
+                    self._last_obs_node_id,
+                    curr_node_id,
+                    "ACTION",
+                    command=action,
+                    step=step,
+                )
+            except Exception:
+                ...
+        self._last_obs_node_id = curr_node_id
+        return curr_node_id

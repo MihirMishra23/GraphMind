@@ -57,7 +57,6 @@ class KGLLMAgent(LLMAgent):
 
         completion = self.llm.generate(
             prompt,
-            max_tokens=self.max_tokens,
             stop=["\n"],
         )
         completion = completion.strip()

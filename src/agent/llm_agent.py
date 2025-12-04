@@ -26,7 +26,6 @@ class LLMAgent(BaseAgent):
         memory_mode: str = "none",
         system_prompt: str = DEFAULT_SYSTEM_PROMPT,
         history_horizon: int = 5,
-        max_tokens: int = 32,
         actions_key: str = "valid_actions",
         extraction_max_tokens: int = 1024,
         extraction_mode: str = "llm",
@@ -36,7 +35,6 @@ class LLMAgent(BaseAgent):
         self.memory_mode = memory_mode
         self.system_prompt = system_prompt
         self.history_horizon = history_horizon
-        self.max_tokens = max_tokens
         self.actions_key = actions_key
         self.extraction_max_tokens = extraction_max_tokens
         self.extraction_mode = extraction_mode
@@ -91,7 +89,7 @@ class LLMAgent(BaseAgent):
         )
         completion = self.llm.generate(
             prompt,
-            max_tokens=self.max_tokens,
+            max_tokens=32,
             stop=["\n"],
         )
         completion = completion.strip()
