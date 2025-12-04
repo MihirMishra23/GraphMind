@@ -13,6 +13,7 @@ class NodeType(str, Enum):
     CHARACTER = "CHARACTER"
     NOTE = "NOTE"
     FLAG = "FLAG"
+    OBSERVATION = "OBSERVATION"
 
 
 class EdgeType(str, Enum):
@@ -22,6 +23,8 @@ class EdgeType(str, Enum):
     ON = "ON"
     STATE = "STATE"
     MENTIONS = "MENTIONS"
+    ACTION = "ACTION"
+    CONTAINS = "CONTAINS"
 
 
 DIRECTIONS = {"north", "south", "east", "west", "up", "down"}
@@ -120,6 +123,15 @@ class WorldKG:
         elif edge_type == EdgeType.MENTIONS:
             if src_type != NodeType.NOTE:
                 raise ValueError("MENTIONS edges must originate from a NOTE.")
+        elif edge_type == EdgeType.ACTION:
+            if not (src_type == NodeType.OBSERVATION and dst_type == NodeType.OBSERVATION):
+                raise ValueError("ACTION edges must link OBSERVATION -> OBSERVATION.")
+        elif edge_type == EdgeType.CONTAINS:
+            # Allow observation->entity or entity->entity containment.
+            if src_type not in {NodeType.OBSERVATION, NodeType.PLAYER, NodeType.ROOM, NodeType.OBJECT, NodeType.CHARACTER, NodeType.NOTE, NodeType.FLAG}:
+                raise ValueError("CONTAINS edges must originate from OBSERVATION or ENTITY nodes.")
+            if dst_type == NodeType.OBSERVATION:
+                raise ValueError("CONTAINS edges must target an entity node.")
 
     def add_relation(
         self, src_id: str, dst_id: str, rel_type: str, **attrs: Any
@@ -136,6 +148,13 @@ class WorldKG:
                 raise ValueError(
                     f"CONNECTED_TO edges require a valid direction ({', '.join(sorted(DIRECTIONS))})."
                 )
+        # For ACTION edges, store the action command as the edge label/name.
+        if rel_enum == EdgeType.ACTION:
+            command = attrs.get("command")
+            if not command:
+                raise ValueError("ACTION edges require a 'command' attribute.")
+            attrs = dict(attrs)
+            attrs["name"] = command
 
         attrs = dict(attrs)
         attrs["type"] = rel_enum.value

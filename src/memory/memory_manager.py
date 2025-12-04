@@ -29,15 +29,15 @@ class MemoryManager:
         self.canonicalizer = Canonicalizer(world_kg)
 
     def decide_and_apply(
-        self, candidate_facts: list[CandidateFact], step: int
+        self, candidate_facts: list[CandidateFact], step: int, observation_node_id: Optional[str] = None
     ) -> list[MemoryDecision]:
         decisions: list[MemoryDecision] = []
         for fact in candidate_facts:
-            decision = self._apply_fact(fact, step)
+            decision = self._apply_fact(fact, step, observation_node_id)
             decisions.append(decision)
         return decisions
 
-    def _apply_fact(self, fact: CandidateFact, step: int) -> MemoryDecision:
+    def _apply_fact(self, fact: CandidateFact, step: int, observation_node_id: Optional[str]) -> MemoryDecision:
         # Simple confidence gate.
         if fact.confidence < 0.25:
             return MemoryDecision(action_type="NOOP", reason="Low confidence")
@@ -60,6 +60,9 @@ class MemoryManager:
             ).canonical_id
 
         try:
+            if observation_node_id:
+                self._link_observation(observation_node_id, subj_ref.canonical_id, obj_ref)
+
             if rel == EdgeType.STATE.value:
                 if fact.state_updates:
                     for key, value in fact.state_updates.items():
@@ -67,26 +70,25 @@ class MemoryManager:
                     return MemoryDecision(
                         action_type="OVERWRITE_STATE", reason="Applied state updates"
                     )
-                elif obj_ref:
-                    # STATE edge to flag node.
+                if obj_ref:
                     self.world_kg.add_relation(subj_ref.canonical_id, obj_ref, rel)
                     return MemoryDecision(action_type="WRITE_NEW", reason="Added STATE edge")
-                else:
-                    return MemoryDecision(action_type="NOOP", reason="No state updates or flag target")
+                return MemoryDecision(action_type="NOOP", reason="No state updates or flag target")
 
-            if rel == EdgeType.IN.value and obj_ref:
-                # Player location is stored as state to respect schema (IN disallows PLAYER as source).
+            if rel in {EdgeType.IN.value, EdgeType.HAS.value, EdgeType.CONTAINS.value} and obj_ref:
+                # Treat CONTAINS as generalized containment.
                 if subj_ref.node_type == NodeType.PLAYER.value:
-                    self.world_kg.set_state(subj_ref.canonical_id, "location", obj_ref, step)
-                    return MemoryDecision(action_type="OVERWRITE_STATE", reason="Updated player location")
-
-                self._remove_has_edges(subj_ref.canonical_id)
-                self.world_kg.move_entity(subj_ref.canonical_id, obj_ref, step)
-                return MemoryDecision(action_type="MOVE_ENTITY", reason="Moved entity into container")
-
-            if rel == EdgeType.HAS.value and obj_ref:
-                self._set_has(subj_ref.canonical_id, obj_ref, step)
-                return MemoryDecision(action_type="WRITE_NEW", reason="Set inventory ownership")
+                    self._set_has(subj_ref.canonical_id, obj_ref, step)
+                    return MemoryDecision(action_type="WRITE_NEW", reason="Set inventory ownership")
+                if subj_ref.node_type in {NodeType.OBJECT.value, NodeType.CHARACTER.value}:
+                    self._remove_has_edges(subj_ref.canonical_id)
+                    self.world_kg.move_entity(subj_ref.canonical_id, obj_ref, step)
+                    return MemoryDecision(action_type="MOVE_ENTITY", reason="Moved entity into container")
+                try:
+                    self.world_kg.add_relation(subj_ref.canonical_id, obj_ref, EdgeType.CONTAINS.value)
+                    return MemoryDecision(action_type="WRITE_NEW", reason="Linked observation/entity with CONTAINS")
+                except Exception as exc:
+                    return MemoryDecision(action_type="NOOP", reason=f"Failed CONTAINS: {exc}")
 
             if rel == EdgeType.ON.value and obj_ref:
                 self.world_kg.add_relation(subj_ref.canonical_id, obj_ref, rel)
@@ -123,14 +125,31 @@ class MemoryManager:
             return NodeType.NOTE
         if rel == EdgeType.CONNECTED_TO.value:
             return NodeType.ROOM
-        if role == "obj" and rel == EdgeType.IN.value:
-            # Containers are usually rooms; fallback to OBJECT for nested containment.
+        if role == "obj" and rel in {EdgeType.IN.value, EdgeType.CONTAINS.value}:
             if any(k in lowered for k in ["room", "hall", "chamber", "kitchen"]):
                 return NodeType.ROOM
             return NodeType.OBJECT
         if rel == EdgeType.HAS.value and role == "subj" and lowered not in {"player", "you", "yourself"}:
             return NodeType.CHARACTER
         return NodeType.OBJECT
+
+    def _link_observation(self, obs_node_id: str, subj_id: str, obj_id: Optional[str]) -> None:
+        """
+        Ensure the creating/editing observation is linked to involved entities via CONTAINS.
+        """
+        if obs_node_id not in self.world_kg.graph:
+            return
+        obs_type = self.world_kg.graph.nodes[obs_node_id].get("type")
+        if obs_type != NodeType.OBSERVATION.value:
+            return
+
+        for eid in [subj_id, obj_id]:
+            if not eid or eid not in self.world_kg.graph:
+                continue
+            try:
+                self.world_kg.add_relation(obs_node_id, eid, EdgeType.CONTAINS.value)
+            except Exception:
+                continue
 
     def _remove_has_edges(self, entity_id: str) -> None:
         # Remove incoming HAS edges (prevent object being both in room and owned).
