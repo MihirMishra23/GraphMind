@@ -177,6 +177,25 @@ def parse_args() -> argparse.Namespace:
         help="Torch dtype for HF model loading (e.g., float16, bfloat16, auto)",
     )
     parser.add_argument(
+        "--llm-backend",
+        type=str,
+        default="llama",
+        choices=["llama", "openai"],
+        help="Backend LLM provider: local Llama HF model or OpenAI chat model.",
+    )
+    parser.add_argument(
+        "--openai-model",
+        type=str,
+        default="gpt-4o-mini",
+        help="OpenAI chat model to use when --llm-backend=openai.",
+    )
+    parser.add_argument(
+        "--openai-api-key",
+        type=str,
+        default=None,
+        help="Optional OpenAI API key (otherwise uses OPENAI_API_KEY env var).",
+    )
+    parser.add_argument(
         "--disable-memory-mode",
         action="store_true",
         help="Disable graph memory (enabled by default).",
