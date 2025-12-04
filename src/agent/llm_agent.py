@@ -55,6 +55,7 @@ class LLMAgent(BaseAgent):
             )
 
     def act(self, observation: str, action_candidates: List[str]) -> Optional[str]:
+        self._last_action_candidates = list(action_candidates)
         kg_text = self._build_kg_context(observation)
         recent_lines = self._get_recent_history_lines(self.history_horizon)
         action = self.propose_action(

@@ -33,6 +33,7 @@ class BaseAgent(ABC):
         self._last_step: Optional[int] = None
         self._prev_obs: Optional[str] = None
         self._last_obs_node_id: Optional[str] = None
+        self._last_action_candidates: Optional[list[str]] = None
         if self.use_memory:
             self._init_memory_backend()
 
@@ -42,6 +43,7 @@ class BaseAgent(ABC):
         self._recent_steps.clear()
         self._last_step = None
         self._prev_obs = None
+        self._last_action_candidates = None
         if self.use_memory:
             self._init_memory_backend()
         self._last_obs_node_id = None
@@ -63,7 +65,9 @@ class BaseAgent(ABC):
             self._recent_steps.append({"action": action, "observation": observation})
 
         if self.use_memory and self.memory_manager and self.world_kg:
-            curr_obs_node = self._record_observation_transition(action, observation, turn_id)
+            curr_obs_node = self._record_observation_transition(
+                action, observation, turn_id, action_candidates=self._last_action_candidates
+            )
             facts = self.extract_entities_and_relations(
                 self._prev_obs, action, observation
             )
@@ -135,7 +139,9 @@ class BaseAgent(ABC):
             lines.append(f"Observation: {step['observation']}")
         return lines
 
-    def _record_observation_transition(self, action: str, observation: str, step: int) -> None:
+    def _record_observation_transition(
+        self, action: str, observation: str, step: int, action_candidates: Optional[list[str]] = None
+    ) -> Optional[str]:
         """
         Add observation nodes and an ACTION edge linking previous -> current observation.
         """
@@ -150,7 +156,10 @@ class BaseAgent(ABC):
             name=curr_node_id,
         )
         self.world_kg.graph.nodes[curr_node_id]["description"] = observation
-        self.world_kg.graph.nodes[curr_node_id]["state"] = {"text": observation}
+        self.world_kg.graph.nodes[curr_node_id]["state"] = {
+            "text": observation,
+            "actions": action_candidates or [],
+        }
         self.world_kg.graph.nodes[curr_node_id]["last_updated_step"] = step
 
         if self._last_obs_node_id:

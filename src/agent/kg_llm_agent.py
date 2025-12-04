@@ -31,6 +31,10 @@ class KGLLMAgent(LLMAgent):
             llm=llm, memory_mode=memory_mode, system_prompt=system_prompt, **kwargs
         )
 
+    def act(self, observation: str, action_candidates: List[str]) -> Optional[str]:
+        self._last_action_candidates = list(action_candidates)
+        return super().act(observation, action_candidates)
+
     def propose_action(
         self,
         obs: str,

@@ -119,7 +119,7 @@ def main() -> None:
             name=obs_node_id,
         )
         world_kg.graph.nodes[obs_node_id]["description"] = observation
-        world_kg.graph.nodes[obs_node_id]["state"] = {"text": observation}
+        world_kg.graph.nodes[obs_node_id]["state"] = {"text": observation, "actions": []}
         world_kg.graph.nodes[obs_node_id]["last_updated_step"] = step
 
         memory_manager.decide_and_apply(facts, step=step, observation_node_id=obs_node_id)
