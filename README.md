@@ -16,7 +16,7 @@ pip install jericho transformers torch accelerate graphviz
 
 ## Quickstart commands
 - Smoke-test the memory pipeline with the heuristic extractor (fast, no LLM load):  
-  `python scripts/jericho_memory_smoke.py --max-steps 30 --graphviz-dot out/jericho_memory.dot --graphviz-png out/jericho_memory.png`
+  `python scripts/jericho_runner.py --agent kg-llm --max-steps 5 --extraction-mode llm  --save-kg out/graph`
 - Use an existing LLM extraction completion instead of the heuristic:  
   `python scripts/jericho_memory_smoke.py --use-llm-output path/to/completion.txt --quiet`
 - Run a walkthrough-only Jericho episode:  

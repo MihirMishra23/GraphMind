@@ -111,7 +111,18 @@ def main() -> None:
 
         observation, reward, done, info = env.step(action)
         facts = extractor.extract(prev_obs, action, observation, world_kg, step)
-        memory_manager.decide_and_apply(facts, step=step)
+        # Record observation node and link it in manager.
+        obs_node_id = f"obs_{step}"
+        world_kg.add_or_get_entity(
+            canonical_id=obs_node_id,
+            node_type="OBSERVATION",
+            name=obs_node_id,
+        )
+        world_kg.graph.nodes[obs_node_id]["description"] = observation
+        world_kg.graph.nodes[obs_node_id]["state"] = {"text": observation}
+        world_kg.graph.nodes[obs_node_id]["last_updated_step"] = step
+
+        memory_manager.decide_and_apply(facts, step=step, observation_node_id=obs_node_id)
         snapshots.store_snapshot(step, world_kg)
         prev_obs = observation
 

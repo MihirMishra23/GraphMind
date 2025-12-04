@@ -46,8 +46,7 @@ def build_agent(
             )
         return LLMAgent(
             llm=llm_client,
-            max_tokens=args.llm_max_tokens,
-            memory_mode=args.memory_mode,
+            memory_mode="none" if args.disable_memory_mode else "llama",
             extraction_max_tokens=args.extract_max_tokens,
             extraction_mode=args.extraction_mode,
         )
@@ -61,8 +60,7 @@ def build_agent(
             )
         return KGLLMAgent(
             llm=llm_client,
-            max_tokens=args.llm_max_tokens,
-            memory_mode=args.memory_mode,
+            memory_mode="none" if args.disable_memory_mode else "llama",
             extraction_max_tokens=args.extract_max_tokens,
             extraction_mode=args.extraction_mode,
         )

@@ -134,17 +134,9 @@ def parse_args() -> argparse.Namespace:
         help="Torch dtype for HF model loading (e.g., float16, bfloat16, auto)",
     )
     parser.add_argument(
-        "--llm-max-tokens",
-        type=int,
-        default=32,
-        help="Max new tokens for LLM action generation",
-    )
-    parser.add_argument(
-        "--memory-mode",
-        type=str,
-        default="none",
-        choices=["none", "llama"],
-        help="Memory pipeline: none (disable) or llama (LLM extraction + grounding).",
+        "--disable-memory-mode",
+        action="store_true",
+        help="Disable graph memory (enabled by default).",
     )
     parser.add_argument(
         "--extract-max-tokens",
@@ -153,21 +145,10 @@ def parse_args() -> argparse.Namespace:
         help="Max new tokens for extraction LLM completions.",
     )
     parser.add_argument(
-        "--graphviz-dot",
+        "--save-kg",
         type=Path,
         default=None,
-        help="Optional path to write GraphViz DOT export of the memory graph.",
-    )
-    parser.add_argument(
-        "--graphviz-png",
-        type=Path,
-        default=None,
-        help="Optional path to also render PNG (requires `dot` binary on PATH). If not provided, uses DOT path with .png.",
-    )
-    parser.add_argument(
-        "--graphviz-include-inactive",
-        action="store_true",
-        help="Include inactive (closed) nodes/edges in GraphViz export.",
+        help="Base path to save the memory KG (writes <path>.dot and <path>.png). PNG requires `dot`.",
     )
     parser.add_argument(
         "--extraction-mode",
@@ -210,12 +191,11 @@ def main() -> None:
         verbose=not args.quiet,
     )
     save_logs(args.text_log, args.json_log, trajectory)
-    if args.graphviz_dot:
-        agent.export_memory(
-            args.graphviz_dot,
-            include_inactive=args.graphviz_include_inactive,
-            png_path=args.graphviz_png,
-        )
+    if args.save_kg:
+        dot_path = args.save_kg.with_suffix(".dot")
+        png_path = args.save_kg.with_suffix(".png")
+        dot_path.parent.mkdir(parents=True, exist_ok=True)
+        agent.export_memory(dot_path, include_inactive=False, png_path=png_path)
 
 
 if __name__ == "__main__":
