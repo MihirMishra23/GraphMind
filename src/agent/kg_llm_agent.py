@@ -11,9 +11,23 @@ from .llm_agent import LLMAgent, DEFAULT_SYSTEM_PROMPT
 from .state_effect_model import StateEffectModel
 
 
-STRUCTURED_SYSTEM_PROMPT = """You control a player in a text adventure game.
-Use the structured world state and recent history to pick the single best next action.
-Return only the command text (no quotes or explanations)."""
+STRUCTURED_SYSTEM_PROMPT = """You control a player in a text adventure game. Your goal is to explore, solve puzzles, collect treasures, and win.
+
+Each turn you receive:
+- Recent history (last ~10 turns) of actions and observations.
+- Structured world state from the knowledge graph (location, exits, objects, inventory, flags).
+- The latest observation resulting from your last action.
+
+Your task:
+- Think step by step about the best next action using the structured context, latest observation, last action, and recent history.
+- If unsure, prefer exploring new states (new directions, inspecting new objects, “look”/“inventory”) rather than repeating loops.
+- Avoid random or purposeless moves; favor progress toward exploration and puzzles.
+- After reasoning, output exactly ONE concise game command (1–3 words).
+
+Output format:
+- Include your reasoning.
+- End with the final command wrapped exactly as:
+  <start> your command <end>"""
 
 
 class KGLLMAgent(LLMAgent):

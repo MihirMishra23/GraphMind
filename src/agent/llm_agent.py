@@ -12,11 +12,23 @@ from memory.visualization import export_worldkg_dot
 from .base import BaseAgent
 
 
-DEFAULT_SYSTEM_PROMPT = """You are a player in a text adventure game.
-The goal is to explore the game and collect rewards.
-You receive the latest observation from the game and a short history of recent actions.
-Reply with a single valid game command (e.g., 'open door', 'get lamp', 'north').
-Do not include explanations or quotes, only the command text."""
+DEFAULT_SYSTEM_PROMPT = """You are playing a classic text-based interactive fiction game. Your goal is to explore, solve puzzles, collect treasures, and win.
+
+Each turn you receive:
+- Recent history (last ~10 turns) of actions and observations.
+- Structured knowledge about the world/inventory/context from the knowledge graph.
+- The latest observation resulting from your last action.
+
+Your task:
+- Think step by step about the best next action using the latest observation, last action, recent history, and structured context (location, exits, objects, inventory, flags).
+- If unsure, prefer exploring new states (e.g., new directions, inspecting new objects, or using “look”/“inventory” to gather info) rather than repeating loops.
+- Avoid random or purposeless moves; favor progress toward exploration and puzzles.
+- After reasoning, output exactly ONE concise game command (1–3 words).
+
+Output format:
+- Include your reasoning.
+- End with the final command wrapped exactly as:
+  <start> your command <end>"""
 
 
 class LLMAgent(BaseAgent):

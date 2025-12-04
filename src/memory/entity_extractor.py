@@ -402,26 +402,47 @@ class LLMEntityRelationExtractor(EntityRelationExtractor):
     # Internal helpers
     # ------------------------------------------------------------------ #
     def _build_prompt(self, prev_obs: str | None, action: str | None, obs: str) -> str:
+        return self._build_structured_prompt(prev_obs, action, obs)
+
+    def _build_structured_prompt(
+        self, prev_obs: str | None, action: str | None, obs: str
+    ) -> str:
         prev_block = prev_obs if prev_obs else "None"
         action_block = action if action else "None"
         template = textwrap.dedent(
             """
-            You read observations and propose structured facts about the world.
-            Return ONLY a JSON array of objects with keys:
-              subj_text (string), rel_type (CONTAINS|ON|STATE|CONNECTED_TO),
+            Think step by step about the text adventure transcript and extract grounded facts.
+            After your reasoning, return ONLY the final JSON array enclosed between <start> and <end>.
+            JSON objects must have keys:
+              subj_text (string), rel_type (IN|CONTAINS|ON|STATE|CONNECTED_TO|NEED|MENTIONS),
               obj_text (string or null), state_updates (object), source ("obs"|"action"),
               confidence (0-1).
 
+            Guidelines:
+            - If the current observation is too terse to contain world facts (e.g., "Opened", "Taken", "Closed."), return [].
+            - Locations: if the text names the current place, add {{"subj_text": "player", "rel_type": "IN", "obj_text": <location>}}.
+            - Objects present: use CONTAINS to connect a location -> object, or container -> contained item (object names <= 3 words).
+            - Spatial relations: use ON when an item rests on a surface.
+            - States: use STATE with state_updates for attributes like open/closed/locked/etc.
+            - Directions/paths: use CONNECTED_TO from the current location toward another location or "to <direction>"; optionally include {{"direction": "<dir>"}} in state_updates.
+            - Requirements: use NEED when the text states something is required.
+            - Mentions: use MENTIONS for notable references not covered above.
+
             Example:
+            <start>
             [
-              {{"subj_text": "mailbox", "rel_type": "CONTAINS", "obj_text": "leaflet", "state_updates": {{}}, "source": "obs", "confidence": 0.8}}
+              {{"subj_text": "player", "rel_type": "IN", "obj_text": "Behind House", "state_updates": {{}}, "source": "obs", "confidence": 0.9}},
+              {{"subj_text": "Behind House", "rel_type": "CONTAINS", "obj_text": "mailbox", "state_updates": {{}}, "source": "obs", "confidence": 0.8}},
+              {{"subj_text": "mailbox", "rel_type": "CONTAINS", "obj_text": "leaflet", "state_updates": {{}}, "source": "obs", "confidence": 0.8}},
+              {{"subj_text": "Behind House", "rel_type": "CONNECTED_TO", "obj_text": "to east", "state_updates": {{"direction": "east"}}, "source": "obs", "confidence": 0.6}}
             ]
+            <end>
 
             Previous observation: {prev_obs}
             Previous action: {action}
             Current observation: {obs}
 
-            JSON array:
+            Reason, then provide the final JSON array between <start> and <end> with no extra text after <end>.
             """
         ).strip()
         return template.format(prev_obs=prev_block, action=action_block, obs=obs)
@@ -475,6 +496,12 @@ class LLMEntityRelationExtractor(EntityRelationExtractor):
         Try to extract the first JSON array from the text, handling fenced code blocks.
         """
         import re
+
+        # Prefer <start> ... <end> blocks.
+        tagged = re.findall(r"<start>\\s*(\\[.*?\\])\\s*<end>", text, flags=re.DOTALL)
+        for block in tagged:
+            if block.strip():
+                return block.strip()
 
         # Prefer fenced ```json ... ``` blocks.
         fenced = re.findall(
