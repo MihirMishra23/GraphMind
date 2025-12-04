@@ -158,6 +158,23 @@ class WorldKG:
 
         attrs = dict(attrs)
         attrs["type"] = rel_enum.value
+        # Deduplicate: if an edge with the same src, dst, type (and label-defining
+        # attributes) already exists, update it instead of adding a parallel edge.
+        label_keys = []
+        if rel_enum == EdgeType.ACTION:
+            label_keys.append("name")
+        if rel_enum == EdgeType.CONNECTED_TO:
+            label_keys.append("direction")
+        for _, v, key, data in list(self.graph.out_edges(src_id, keys=True, data=True)):
+            if data.get("type") != rel_enum.value:
+                continue
+            if v != dst_id:
+                continue
+            if all(data.get(k) == attrs.get(k) for k in label_keys):
+                # Merge/refresh attributes (preserve key to avoid multi-edge duplicates).
+                self.graph[src_id][dst_id][key].update(attrs)
+                return
+
         self.graph.add_edge(src_id, dst_id, **attrs)
 
     def move_entity(self, entity_id: str, new_container_id: str, step: int) -> None:
