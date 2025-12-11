@@ -10,6 +10,7 @@ import torch
 from llm import LLM, LlamaLLM, OpenAILLM
 from .base import BaseAgent
 from .llm_agent import LLMAgent
+from .graphmind_agent import GraphMindAgent
 from .walkthrough_agent import WalkthroughAgent
 
 
@@ -36,7 +37,7 @@ def build_agent(
     if name == "walkthrough":
         assert walkthrough
         return WalkthroughAgent(walkthrough)
-    if name == "llm":
+    if name in {"llm", "graphmind"}:
         if llm_client is None:
             if llm_backend == "openai":
                 llm_client = OpenAILLM(
@@ -50,6 +51,8 @@ def build_agent(
                     device_map=device_map,
                     dtype=args.dtype,
                 )
+        if name == "graphmind":
+            return GraphMindAgent(llm=llm_client)
         return LLMAgent(llm=llm_client)
 
     raise ValueError(f"Unsupported agent type: {name}")
@@ -59,6 +62,7 @@ __all__ = [
     "BaseAgent",
     "WalkthroughAgent",
     "LLMAgent",
+    "GraphMindAgent",
     "build_agent",
     "resolve_device_map",
 ]

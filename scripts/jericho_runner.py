@@ -126,8 +126,8 @@ def parse_args() -> argparse.Namespace:
         "--agent",
         type=str,
         default="walkthrough",
-        choices=["walkthrough", "llm"],
-        help="Agent type (walkthrough|llm)",
+        choices=["walkthrough", "llm", "graphmind"],
+        help="Agent type (walkthrough|llm|graphmind)",
     )
     parser.add_argument(
         "--manual",
