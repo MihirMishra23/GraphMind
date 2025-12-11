@@ -44,8 +44,10 @@ class GraphMindAgent(BaseAgent):
     def reset(self, env: object) -> None:
         super().reset(env)
 
-    def act(self, observation: str, action_candidates: List[str]) -> Optional[str]:
+    def observe(self, observation: str):
         self.memory_manager.update_memory(observation, self._last_action)
+
+    def act(self, observation: str, action_candidates: List[str]) -> Optional[str]:
         recent_lines = self._get_recent_history_lines(self.history_horizon)
         action = self.propose_action(
             observation,
