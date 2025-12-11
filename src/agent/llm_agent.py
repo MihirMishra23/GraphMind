@@ -1,13 +1,9 @@
 from __future__ import annotations
 
-"""Agent that queries an LLM to decide the next action and manages its own memory."""
-from pathlib import Path
+"""Agent that queries an LLM to decide the next action."""
 from typing import List, Optional, Sequence
 
 from llm import LLM
-from memory.entity_extractor import CandidateFact, LLMEntityRelationExtractor
-from memory.schema import WorldKG
-from memory.visualization import export_worldkg_dot
 
 from .base import BaseAgent
 
@@ -16,12 +12,11 @@ DEFAULT_SYSTEM_PROMPT = """You are playing a classic text-based interactive fict
 
 Each turn you receive:
 - Recent history (last ~10 turns) of actions and observations.
-- Structured knowledge about the world/inventory/context from the knowledge graph.
 - The latest observation resulting from your last action.
 
 Your task:
-- Think step by step about the best next action using the latest observation, last action, recent history, and structured context (location, exits, objects, inventory, flags).
-- If unsure, prefer exploring new states (e.g., new directions, inspecting new objects, or using “look”/“inventory” to gather info) rather than repeating loops.
+- Think step by step about the best next action using the latest observation, last action, and recent history.
+- If unsure, prefer exploring new states (e.g., new directions, inspecting new objects, or using “look”/“inventory”) rather than repeating loops.
 - Avoid random or purposeless moves; favor progress toward exploration and puzzles.
 - After reasoning, output exactly ONE concise game command (1–3 words).
 
@@ -35,52 +30,32 @@ class LLMAgent(BaseAgent):
     def __init__(
         self,
         llm: LLM,
-        memory_mode: str = "none",
         system_prompt: str = DEFAULT_SYSTEM_PROMPT,
         history_horizon: int = 5,
-        extraction_max_tokens: int = 1024,
-        extraction_mode: str = "llm",
     ) -> None:
-        super().__init__(use_memory=memory_mode != "none")
+        super().__init__()
         self.llm = llm
-        self.memory_mode = memory_mode
         self.system_prompt = system_prompt
         self.history_horizon = history_horizon
-        self.extraction_max_tokens = extraction_max_tokens
-        self.extraction_mode = extraction_mode
         self._last_action: Optional[str] = None
-        if self.use_memory and self.extraction_mode == "llm":
-            self.entity_extractor = LLMEntityRelationExtractor(
-                llm=self.llm,
-                max_tokens=self.extraction_max_tokens,
-            )
 
     def reset(self, env: object) -> None:
         super().reset(env)
-        if self.use_memory and self.extraction_mode == "llm":
-            # Recreate the extractor to ensure fresh state and updated LLM settings per episode.
-            self.entity_extractor = LLMEntityRelationExtractor(
-                llm=self.llm,
-                max_tokens=self.extraction_max_tokens,
-            )
 
     def act(self, observation: str, action_candidates: List[str]) -> Optional[str]:
-        kg_text = self._build_kg_context(observation)
         recent_lines = self._get_recent_history_lines(self.history_horizon)
         action = self.propose_action(
             observation,
-            kg_text,
             recent_lines,
             action_candidates=action_candidates,
         )
-        action = self._avoid_recent_repeat(action, action_candidates)
+        action = self._avoid_recent_repeat(action, action_candidates, observation)
         self._last_action = action
         return action or "look"
 
     def propose_action(
         self,
         obs: str,
-        kg_text: str,
         recent_history: list[str],
         action_candidates: Optional[Sequence[str]] = None,
     ) -> str:
@@ -89,11 +64,9 @@ class LLMAgent(BaseAgent):
             if recent_history
             else "None"
         )
-        kg_block = kg_text.strip() if kg_text.strip() else "None"
         prompt = (
             f"{self.system_prompt}\n\n"
             f"Recent history:\n{history_block}\n\n"
-            f"Known context:\n{kg_block}\n\n"
             f"Latest observation:\n{obs}\n\n"
             f"Next action (one command):"
         )
@@ -123,7 +96,10 @@ class LLMAgent(BaseAgent):
         return action_candidates[0]
 
     def _avoid_recent_repeat(
-        self, action: str, action_candidates: Sequence[str]
+        self,
+        action: str,
+        action_candidates: Sequence[str],
+        observation: Optional[str] = None,
     ) -> str:
         """
         Heuristic to break out of short loops: if the model keeps repeating the
@@ -131,50 +107,65 @@ class LLMAgent(BaseAgent):
         """
         if not action_candidates:
             return action
-        recent_actions = [step["action"] for step in self._recent_steps[-2:]]
-        if recent_actions and all(a.lower() == action.lower() for a in recent_actions):
+        recent_steps = self._recent_steps[-3:]
+        recent_actions = [step["action"] for step in recent_steps]
+        action_lower = action.lower()
+
+        # If we have repeated the same action recently, pick a different candidate.
+        if recent_actions and all(a.lower() == action_lower for a in recent_actions):
             for cand in action_candidates:
-                if cand.lower() != action.lower():
+                if cand.lower() != action_lower:
                     return cand
+
+        # Break simple open/close toggle loops on the same object.
+        if len(recent_actions) >= 2:
+            last = recent_actions[-1].lower()
+            prev = recent_actions[-2].lower()
+            verb_last, obj_last = self._split_verb_object(last)
+            verb_prev, obj_prev = self._split_verb_object(prev)
+            verb_curr, obj_curr = self._split_verb_object(action_lower)
+            toggles = {
+                ("open", "close"),
+                ("close", "open"),
+                ("turn on", "turn off"),
+                ("turn off", "turn on"),
+            }
+            if (
+                (verb_prev, verb_last) in toggles
+                and obj_prev == obj_last
+                and obj_curr == obj_last
+            ):
+                for cand in action_candidates:
+                    cand_lower = cand.lower()
+                    cand_verb, cand_obj = self._split_verb_object(cand_lower)
+                    if cand_obj != obj_last or cand_verb not in {verb_prev, verb_last}:
+                        return cand
+
+        # If the latest observation did not change from the prior step and we are about
+        # to repeat the same action, choose an alternative to escape loops.
+        if observation:
+            obs_clean = observation.strip().lower()
+            if recent_steps:
+                last_obs = recent_steps[-1]["observation"].strip().lower()
+                if (
+                    obs_clean == last_obs
+                    and recent_actions
+                    and recent_actions[-1].lower() == action_lower
+                ):
+                    for cand in action_candidates:
+                        if cand.lower() not in {a.lower() for a in recent_actions}:
+                            return cand
+                        if cand.lower() != action_lower:
+                            return cand
         return action
 
-    def extract_entities_and_relations(
-        self, prev_obs: str | None, action: str | None, obs: str
-    ) -> list[CandidateFact]:
-        """Use the configured extraction mode: llm or naive."""
-        if not self.use_memory:
-            return []
-        if self.extraction_mode == "llm" and isinstance(
-            self.entity_extractor, LLMEntityRelationExtractor
-        ):
-            return self.entity_extractor.extract(
-                prev_obs, action, obs, self.world_kg, step=self._last_step or 0
-            )
-        return super().extract_entities_and_relations(prev_obs, action, obs)
-
-    def export_memory(
-        self,
-        dot_path: Path,
-        include_inactive: bool = False,
-        png_path: Optional[Path] = None,
-    ) -> None:
-        """Export the current WorldKG to DOT/PNG if memory is enabled."""
-        if not self.use_memory or not self.world_kg:
-            return None
-        export_worldkg_dot(self.world_kg, dot_path, png_path)
-
-    # ------------------------------------------------------------------ #
-    # Internal helpers
-    # ------------------------------------------------------------------ #
-    def _build_kg_context(self, observation: str) -> str:
+    def _split_verb_object(self, action: str) -> tuple[str, str]:
         """
-        Render a small, relevant subgraph around the player/context as text for
-        the prompt. Returns empty string when memory is disabled.
+        Naively split an action into (verb, object) to detect toggles.
         """
-        if not self.use_memory or not self.retriever or not self.world_kg:
-            return ""
-        step = self._last_step if self._last_step is not None else 0
-        subgraph: WorldKG = self.retriever.get_relevant_subgraph(
-            observation, step=step, radius=2
-        )
-        return subgraph.to_text_summary()
+        parts = action.split()
+        if not parts:
+            return "", ""
+        if len(parts) == 1:
+            return parts[0], ""
+        return parts[0], " ".join(parts[1:])

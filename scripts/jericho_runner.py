@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Run a Jericho game with a pluggable agent and memory backend."""
+"""Run a Jericho game with a pluggable agent."""
 from __future__ import annotations
 
 import argparse
@@ -16,7 +16,6 @@ if str(SRC_PATH) not in sys.path:
     sys.path.insert(0, str(SRC_PATH))
 
 from agent import BaseAgent, build_agent  # type: ignore
-from llm import LLM, LlamaLLM  # type: ignore
 
 try:
     from jericho import FrotzEnv
@@ -36,13 +35,11 @@ def run_episode(
     max_steps: int,
     verbose: bool = True,
     manual: bool = False,
-    save_kg_path: Optional[Path] = None,
 ) -> List[Dict[str, Any]]:
     observation, info = env.reset()
     agent.reset(env)
     trajectory: List[Dict[str, Any]] = []
 
-    # Process initial observation before any actions to populate the KG.
     agent.observe(
         turn_id=-1,
         action="start game",
@@ -80,11 +77,6 @@ def run_episode(
             info,
             next_action_candidates=env.get_valid_actions(),
         )
-        if save_kg_path and logging.getLogger().isEnabledFor(logging.DEBUG):
-            dot_path = save_kg_path.with_suffix(".dot")
-            png_path = save_kg_path.with_suffix(".png")
-            dot_path.parent.mkdir(parents=True, exist_ok=True)
-            agent.export_memory(dot_path, include_inactive=False, png_path=png_path)
 
         record = {
             "step": step,
@@ -131,7 +123,11 @@ def parse_args() -> argparse.Namespace:
         help="Path to the .z machine file",
     )
     parser.add_argument(
-        "--agent", type=str, default="walkthrough", help="Agent type (walkthrough|llm)"
+        "--agent",
+        type=str,
+        default="walkthrough",
+        choices=["walkthrough", "llm"],
+        help="Agent type (walkthrough|llm)",
     )
     parser.add_argument(
         "--manual",
@@ -196,30 +192,6 @@ def parse_args() -> argparse.Namespace:
         help="Optional OpenAI API key (otherwise uses OPENAI_API_KEY env var).",
     )
     parser.add_argument(
-        "--disable-memory-mode",
-        action="store_true",
-        help="Disable graph memory (enabled by default).",
-    )
-    parser.add_argument(
-        "--extract-max-tokens",
-        type=int,
-        default=256,
-        help="Max new tokens for extraction LLM completions.",
-    )
-    parser.add_argument(
-        "--save-kg",
-        type=Path,
-        default=None,
-        help="Base path to save the memory KG (writes <path>.dot and <path>.png). PNG requires `dot`.",
-    )
-    parser.add_argument(
-        "--extraction-mode",
-        type=str,
-        default="naive",
-        choices=["llm", "naive"],
-        help="Extraction pipeline: llm (prompted extraction) or naive (heuristic).",
-    )
-    parser.add_argument(
         "--log-level",
         type=str,
         default="INFO",
@@ -234,7 +206,7 @@ def main() -> None:
     logging.basicConfig(level=getattr(logging, args.log_level.upper(), logging.INFO))
 
     env = FrotzEnv(str(args.game), seed=args.seed)
-    shared_llm: Optional[LLM] = None
+    shared_llm = None
     if args.agent == "walkthrough":
         agent = build_agent(
             args.agent,
@@ -243,7 +215,7 @@ def main() -> None:
             walkthrough=env.get_walkthrough(),
         )
     else:
-        # For llm-based agents (llm, kg-llm), build_agent will create the LLM client if missing.
+        # For llm-based agents, build_agent will create the LLM client if missing.
         agent = build_agent(args.agent, args=args, llm_client=shared_llm)
 
     trajectory = run_episode(
@@ -252,14 +224,8 @@ def main() -> None:
         max_steps=args.max_steps,
         verbose=not args.quiet,
         manual=args.manual,
-        save_kg_path=args.save_kg,
     )
     save_logs(args.text_log, args.json_log, trajectory)
-    if args.save_kg:
-        dot_path = args.save_kg.with_suffix(".dot")
-        png_path = args.save_kg.with_suffix(".png")
-        dot_path.parent.mkdir(parents=True, exist_ok=True)
-        agent.export_memory(dot_path, include_inactive=False, png_path=png_path)
 
 
 if __name__ == "__main__":

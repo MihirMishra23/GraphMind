@@ -10,7 +10,6 @@ import torch
 from llm import LLM, LlamaLLM, OpenAILLM
 from .base import BaseAgent
 from .llm_agent import LLMAgent
-from .kg_llm_agent import KGLLMAgent
 from .walkthrough_agent import WalkthroughAgent
 
 
@@ -26,7 +25,6 @@ def resolve_device_map(requested: str) -> str:
     return "cpu"
 
 
-# TODO: for the walkthroughagent add an additional argument called walkthrough that's a model parameter and is passed in as input to walkthroughagent
 def build_agent(
     name: str,
     args: argparse.Namespace,
@@ -52,32 +50,7 @@ def build_agent(
                     device_map=device_map,
                     dtype=args.dtype,
                 )
-        return LLMAgent(
-            llm=llm_client,
-            memory_mode="none" if args.disable_memory_mode else "llama",
-            extraction_max_tokens=args.extract_max_tokens,
-            extraction_mode=args.extraction_mode,
-        )
-    if name in {"kg-llm", "llm-kg"}:
-        if llm_client is None:
-            if llm_backend == "openai":
-                llm_client = OpenAILLM(
-                    model=getattr(args, "openai_model", "gpt-4o-mini"),
-                    api_key=getattr(args, "openai_api_key", None),
-                )
-            else:
-                device_map = resolve_device_map(args.device_map)
-                llm_client = LlamaLLM(
-                    model_id=args.model_id,
-                    device_map=device_map,
-                    dtype=args.dtype,
-                )
-        return KGLLMAgent(
-            llm=llm_client,
-            memory_mode="none" if args.disable_memory_mode else "llama",
-            extraction_max_tokens=args.extract_max_tokens,
-            extraction_mode=args.extraction_mode,
-        )
+        return LLMAgent(llm=llm_client)
 
     raise ValueError(f"Unsupported agent type: {name}")
 
@@ -86,7 +59,6 @@ __all__ = [
     "BaseAgent",
     "WalkthroughAgent",
     "LLMAgent",
-    "KGLLMAgent",
     "build_agent",
     "resolve_device_map",
 ]
