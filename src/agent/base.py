@@ -21,19 +21,10 @@ class BaseAgent(ABC):
         self._recent_steps.clear()
         self._last_step = None
 
-    def observe(
-        self,
-        turn_id: int,
-        action: str,
-        observation: str,
-        reward: float,
-        info: Optional[dict] = None,
-        next_action_candidates: Optional[list[str]] = None,
-    ) -> None:
+    @abstractmethod
+    def observe(self, observation: str) -> None:
         """Record a completed step for simple history heuristics."""
-        self._last_step = turn_id
-        if action:
-            self._recent_steps.append({"action": action, "observation": observation})
+        raise NotImplementedError
 
     @abstractmethod
     def act(self, observation: str, action_candidates: list[str]) -> Optional[str]:

@@ -38,18 +38,15 @@ def run_episode(
 ) -> List[Dict[str, Any]]:
     observation, info = env.reset()
     agent.reset(env)
+    if verbose:
+        print(f"Step 0: action: start")
+        print((observation, info))
+
     trajectory: List[Dict[str, Any]] = []
 
-    agent.observe(
-        turn_id=-1,
-        action="start game",
-        observation=observation,
-        reward=0.0,
-        info=info,
-        next_action_candidates=env.get_valid_actions(),
-    )
+    agent.observe(observation)
 
-    for step in range(max_steps):
+    for step in range(1, max_steps):
         valid_actions = env.get_valid_actions()
         if manual:
             print("\n--- Manual step ---")
@@ -69,14 +66,7 @@ def run_episode(
             break
 
         observation, reward, done, info = env.step(action)
-        agent.observe(
-            step,
-            action,
-            observation,
-            reward,
-            info,
-            next_action_candidates=env.get_valid_actions(),
-        )
+        agent.observe(observation)
 
         record = {
             "step": step,
@@ -90,7 +80,7 @@ def run_episode(
 
         if verbose:
             print(f"Step {step}: action {action}")
-            print((observation, reward, done, info))
+            print((observation, info))
 
         if done:
             break
