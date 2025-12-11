@@ -3,7 +3,7 @@ from __future__ import annotations
 """Lightweight memory manager for extracting entities from observations."""
 
 import json
-from typing import Optional
+from typing import Optional, Literal
 
 from llm import LLM
 
@@ -13,7 +13,7 @@ class MemoryManager:
         self.llm = llm
         self.memory = {"player": {"has": [], "location": "start"}}
 
-    def extract_relevant_entities(
+    def _extract_relevant_entities(
         self, observation: str, last_action: str
     ) -> list[str]:
         action_text = last_action or "None"
@@ -48,17 +48,37 @@ class MemoryManager:
         print(f"{entities=}")
         return entities
 
+    def _classify_entity(self, entity) -> Literal["location", "object"]:
+        prompt = (
+            "Decide if the given entity from a text adventure is a location or an object.\n"
+            "Respond with exactly one word: location or object.\n"
+            f"Entity: {entity}\n"
+            "Type:"
+        )
+        completion = (
+            self.llm.generate(prompt, max_tokens=3, stop=["\n"]).strip().lower()
+        )
+        assert completion in {"location", "object"}
+        print(f"{completion=}")
+        return completion  # type: ignore
+
     def update_memory(self, observation: str, last_action: str) -> None:
-        entities = self.extract_relevant_entities(observation, last_action)
+        entities = self._extract_relevant_entities(observation, last_action)
         known = {name.lower() for name in self.memory}
-        for ent in entities:
-            ent_key = ent.lower()
-            if ent_key in known:
+        for entity in entities:
+            entity_key = entity.lower()
+            if entity_key in known:
                 print("update")
             else:
                 print("add")
-                self.memory[ent] = {}
-                known.add(ent_key)
+                self._add_memory(entity)
+                known.add(entity_key)
+
+    def _add_memory(
+        self, entity, attribute: Optional[str] = None, val: Optional[str] = None
+    ):
+        entity_type = self._classify_entity(entity)
+        self.memory[entity] = {"type": entity_type}
 
 
 __all__ = ["MemoryManager"]
