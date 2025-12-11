@@ -64,12 +64,44 @@ class MemoryManager:
             f"Error when classifying entity {entity} - received {completion=}"
         )
 
+    def _classify_action(
+        self, action
+    ) -> Literal["navigation", "manipulation", "perception", "start"]:
+        if action == "start":
+            return "start"
+        prompt = (
+            "I want to know the type of the action. Respond with the correct type of the action.\n"
+            "There are 3 types: navigation (movement like go north, enter), manipulation (interacting with objects like open door, take key), perception (observing like look, examine, inventory).\n"
+            "Respond with exactly one of: navigation, manipulation, perception. No other text.\n\n"
+            "Example 1:\n"
+            "Action 'go north' is of type 'navigation'<END>\n\n"
+            "Example 2:\n"
+            "Action 'open the mailbox' is of type 'manipulation'<END>\n\n"
+            "Example 3:\n"
+            "Action 'look around' is of type 'perception'<END>\n\n"
+            f"Action '{action}' is of type "
+        )
+        completion = (
+            self.llm.generate(prompt, max_tokens=6, stop=["<END>"]).strip().lower()
+        )
+        if "navigation" in completion:
+            return "navigation"
+        if "manipulation" in completion:
+            return "manipulation"
+        if "perception" in completion:
+            return "perception"
+        raise Exception(
+            f"Error when classifying action '{action}' - received {completion=}"
+        )
+
     def update_memory(self, observation: str, last_action: str) -> None:
         print("=" * 20)
         print("Updating memory")
+        print("Action type is", self._classify_action(last_action))
         entities = self._extract_relevant_entities(observation, last_action)
         new_locations: list[str] = []
         for entity in entities:
+            print()
             print(f"updating memory for {entity=}")
             entity_type = self._classify_entity(entity)
             print(f"{entity_type=}")
