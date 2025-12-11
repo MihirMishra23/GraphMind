@@ -27,8 +27,10 @@ class BaseAgent(ABC):
         raise NotImplementedError
 
     @abstractmethod
-    def act(self, observation: str, action_candidates: list[str]) -> Optional[str]:
-        """Return the next action string for the environment."""
+    def act(
+        self, observation: str, action_candidates: list[str], override: Optional[str] = None
+    ) -> Optional[str]:
+        """Return the next action string for the environment (use override if provided)."""
         raise NotImplementedError
 
     # ------------------------------------------------------------------ #

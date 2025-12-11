@@ -45,7 +45,15 @@ class LLMAgent(BaseAgent):
     def observe(self, observation: str) -> None:
         pass
 
-    def act(self, observation: str, action_candidates: List[str]) -> Optional[str]:
+    def act(
+        self,
+        observation: str,
+        action_candidates: List[str],
+        override: Optional[str] = None,
+    ) -> Optional[str]:
+        if override:
+            self._last_action = override
+            return override
         recent_lines = self._get_recent_history_lines(self.history_horizon)
         action = self.propose_action(
             observation,

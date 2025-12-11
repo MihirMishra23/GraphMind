@@ -60,6 +60,7 @@ def run_episode(
                 action = ""
             if not action:
                 break
+            action = agent.act(observation, valid_actions, override=action)
         else:
             action = agent.act(observation, valid_actions)
         if action is None:

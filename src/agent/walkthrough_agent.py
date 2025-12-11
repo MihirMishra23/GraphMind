@@ -24,7 +24,14 @@ class WalkthroughAgent(BaseAgent):
     def observe(self, observation: str) -> None:
         pass
 
-    def act(self, observation: str, action_candidates: List[str]) -> Optional[str]:
+    def act(
+        self,
+        observation: str,
+        action_candidates: List[str],
+        override: Optional[str] = None,
+    ) -> Optional[str]:
+        if override:
+            return override
         if self._cursor < len(self._actions):
             action = self._actions[self._cursor]
             self._cursor += 1
