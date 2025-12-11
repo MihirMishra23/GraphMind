@@ -38,14 +38,14 @@ class GraphMindAgent(BaseAgent):
         self.llm = llm
         self.system_prompt = system_prompt
         self.history_horizon = history_horizon
-        self._last_action: Optional[str] = None
+        self._last_action: str = "start"
         self.memory_manager = MemoryManager(llm)
 
     def reset(self, env: object) -> None:
         super().reset(env)
 
     def act(self, observation: str, action_candidates: List[str]) -> Optional[str]:
-        self.memory_manager.extract_relevant_entities(observation, self._last_action)
+        self.memory_manager.update_memory(observation, self._last_action)
         recent_lines = self._get_recent_history_lines(self.history_horizon)
         action = self.propose_action(
             observation,

@@ -11,9 +11,10 @@ from llm import LLM
 class MemoryManager:
     def __init__(self, llm: LLM) -> None:
         self.llm = llm
+        self.memory = {"player": {"has": [], "location": "start"}}
 
     def extract_relevant_entities(
-        self, observation: str, last_action: Optional[str] = None
+        self, observation: str, last_action: str
     ) -> list[str]:
         action_text = last_action or "None"
         prompt = (
@@ -44,8 +45,20 @@ class MemoryManager:
                 entities = [str(item).strip() for item in parsed if str(item).strip()]
         except Exception:
             entities = [part.strip() for part in text.split(",") if part.strip()]
-
+        print(f"{entities=}")
         return entities
+
+    def update_memory(self, observation: str, last_action: str) -> None:
+        entities = self.extract_relevant_entities(observation, last_action)
+        known = {name.lower() for name in self.memory}
+        for ent in entities:
+            ent_key = ent.lower()
+            if ent_key in known:
+                print("update")
+            else:
+                print("add")
+                self.memory[ent] = {}
+                known.add(ent_key)
 
 
 __all__ = ["MemoryManager"]
