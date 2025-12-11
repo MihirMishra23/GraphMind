@@ -20,18 +20,19 @@ class Memory:
             raise ValueError(f"{field} cannot be empty")
         return normalized
 
-    def add_location(self, location_id: str) -> None:
+    def add_location_node(self, location_id: str) -> None:
         """Ensure a location exists."""
         loc = self._normalize(location_id, "location_id")
         self.locations.setdefault(loc, {})
 
-    def connect_locations(self, src: str, direction: str, dest: str) -> None:
+    def add_location_edge(self, src: str, direction: str, dest: str) -> None:
         """Add a directional edge from src to dest labeled by direction."""
         src_id = self._normalize(src, "src")
         dest_id = self._normalize(dest, "dest")
         dir_id = self._normalize(direction, "direction")
-        self.add_location(src_id)
-        self.add_location(dest_id)
+        assert (
+            src_id in self.locations and dest_id in self.locations
+        ), "Both locations must exist before adding an edge"
         self.locations[src_id][dir_id] = dest_id
 
     def neighbors(self, location_id: str) -> dict[str, str]:
@@ -63,7 +64,7 @@ class Memory:
     def set_player_location(self, location_id: str) -> None:
         """Set the player's current location."""
         loc = self._normalize(location_id, "location_id")
-        self.add_location(loc)
+        self.add_location_node(loc)
         self.player["location"] = loc
 
     def add_to_inventory(self, object_id: str) -> None:
@@ -105,10 +106,10 @@ class Memory:
         """Reconstruct Memory from a dict snapshot."""
         mem = cls()
         for loc, neighbors in data.get("locations", {}).items():
-            mem.add_location(loc)
+            mem.add_location_node(loc)
             if isinstance(neighbors, dict):
                 for direction, dest in neighbors.items():
-                    mem.connect_locations(loc, direction, dest)
+                    mem.add_location_edge(loc, direction, dest)
         for obj_id, state in data.get("objects", {}).items():
             if isinstance(state, dict):
                 mem.set_object_state(obj_id, state)
