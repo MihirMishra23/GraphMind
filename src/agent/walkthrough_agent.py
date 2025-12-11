@@ -21,6 +21,9 @@ class WalkthroughAgent(BaseAgent):
         self._actions = list(walkthrough) if walkthrough is not None else []
         self._cursor = 0
 
+    def observe(self, observation: str) -> None:
+        pass
+
     def act(self, observation: str, action_candidates: List[str]) -> Optional[str]:
         if self._cursor < len(self._actions):
             action = self._actions[self._cursor]

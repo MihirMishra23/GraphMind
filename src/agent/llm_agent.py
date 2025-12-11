@@ -42,6 +42,9 @@ class LLMAgent(BaseAgent):
     def reset(self, env: object) -> None:
         super().reset(env)
 
+    def observe(self, observation: str) -> None:
+        pass
+
     def act(self, observation: str, action_candidates: List[str]) -> Optional[str]:
         recent_lines = self._get_recent_history_lines(self.history_horizon)
         action = self.propose_action(
