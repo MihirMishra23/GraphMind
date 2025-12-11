@@ -6,12 +6,13 @@ import json
 from typing import Optional, Literal
 
 from llm import LLM
+from memory import Memory
 
 
 class MemoryManager:
     def __init__(self, llm: LLM) -> None:
         self.llm = llm
-        self.memory = {"player": {"has": [], "location": "start"}}
+        self.memory = Memory()
 
     def _extract_relevant_entities(
         self, observation: str, last_action: str
@@ -50,35 +51,35 @@ class MemoryManager:
 
     def _classify_entity(self, entity) -> Literal["location", "object"]:
         prompt = (
-            "Decide if the given entity from a text adventure is a location or an object.\n"
-            "Respond with exactly one word: location or object.\n"
-            f"Entity: {entity}\n"
-            "Type:"
+            "I want to know the type of the entity. Respond with the correct type of the entity\n"
+            "Respond with exactly one word: 'location' or 'object'.\n\n"
+            f"Between location and object, {entity} is of type "
         )
-        completion = (
-            self.llm.generate(prompt, max_tokens=3, stop=["\n"]).strip().lower()
+        completion = self.llm.generate(prompt, max_tokens=20, stop=None).strip().lower()
+        if "location" in completion:
+            return "location"
+        if "object" in completion:
+            return "object"
+        raise Exception(
+            f"Error when classifying entity {entity} - received {completion=}"
         )
-        assert completion in {"location", "object"}
-        print(f"{completion=}")
-        return completion  # type: ignore
 
     def update_memory(self, observation: str, last_action: str) -> None:
+        print("=" * 20)
+        print("Updating memory")
         entities = self._extract_relevant_entities(observation, last_action)
-        known = {name.lower() for name in self.memory}
+        new_locations: list[str] = []
         for entity in entities:
-            entity_key = entity.lower()
-            if entity_key in known:
-                print("update")
-            else:
-                print("add")
-                self._add_memory(entity)
-                known.add(entity_key)
-
-    def _add_memory(
-        self, entity, attribute: Optional[str] = None, val: Optional[str] = None
-    ):
-        entity_type = self._classify_entity(entity)
-        self.memory[entity] = {"type": entity_type}
+            print(f"updating memory for {entity=}")
+            entity_type = self._classify_entity(entity)
+            print(f"{entity_type=}")
+            if entity_type == "location":
+                self.memory.add_location_node(entity)
+                new_locations.append(entity)
+                print(self.memory._snapshot())
+        if new_locations:
+            self.memory.set_player_location(new_locations[-1])
+        print("=" * 20)
 
 
 __all__ = ["MemoryManager"]
