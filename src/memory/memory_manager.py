@@ -119,9 +119,7 @@ class MemoryManager:
 
         return self._with_retries(classify, "classify_action")
 
-    def _update_location(
-        self, observation: str, navigation_action: str, potential_locations: list
-    ) -> None:
+    def _update_location(self, observation: str, navigation_action: str) -> None:
         """
         Use the LLM to infer the current location from the observation, update the
         player's location, and add a directional edge from the previous location.
@@ -155,19 +153,17 @@ class MemoryManager:
         action_type = self._classify_action(last_action)
         print(f"action '{last_action}' is of type {action_type}")
         entities = self._extract_relevant_entities(observation, last_action)
-        locations = []
-        for entity in entities:
-            entity_type = self._classify_entity(entity)
-            print(f"entity '{entity}' is of type {entity_type}")
-            if entity_type == "location":
-                locations.append(entity)
-            #     self.memory.add_location_node(entity)
-            #     print(self.memory._snapshot())
         if action_type in {"navigation", "start"}:
-            self._update_location(observation, last_action, locations)
-        print()
+            self._update_location(observation, last_action)
+        for entity in entities:
+            entity_type = self.memory.entity_map.setdefault(
+                entity, self._classify_entity(entity)
+            )
+            print(f"entity '{entity}' is of type {entity_type}")
+
         print(self.memory._snapshot())
         print("=" * 20)
+        print()
 
 
 __all__ = ["MemoryManager"]
