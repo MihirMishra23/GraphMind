@@ -148,7 +148,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--model-id",
         type=str,
-        default="meta-llama/Llama-3.2-3B-Instruct",
+        default="meta-llama/Llama-3.1-8B-Instruct",
         help="Hugging Face model id for the LLM agent",
     )
     parser.add_argument(

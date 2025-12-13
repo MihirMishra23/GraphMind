@@ -41,7 +41,7 @@ class LlamaLLM(LLM):
             eos_token_id=self.tokenizer.eos_token_id,
             pad_token_id=self.tokenizer.eos_token_id,
             return_full_text=False,
-            do_sample=False,
+            do_sample=True,
         )
         text = outputs[0]["generated_text"]
         completion = text
