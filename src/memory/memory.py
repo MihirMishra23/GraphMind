@@ -11,6 +11,7 @@ class Memory:
         self.locations: dict[str, dict[str, str]] = {"start": {}}
         self.objects: dict[str, dict] = {}
         self.player: dict[str, object] = {"location": "start", "inventory": []}
+        self.entity_map: dict[str, str] = {}
 
     def _normalize(self, value: Optional[str], field: str) -> str:
         if value is None:
@@ -24,6 +25,7 @@ class Memory:
         """Ensure a location exists."""
         loc = self._normalize(location_id, "location_id")
         self.locations.setdefault(loc, {})
+        self.entity_map.setdefault(loc, "location")
 
     def add_location_edge(self, src: str, direction: str, dest: str) -> None:
         """Add a directional edge from src to dest labeled by direction."""
@@ -43,6 +45,16 @@ class Memory:
     def list_locations(self) -> list[str]:
         """List known locations."""
         return list(self.locations.keys())
+
+    def add_object(self, object_id: str, state: Optional[dict] = None) -> None:
+        """Ensure an object exists with optional initial state."""
+        obj = self._normalize(object_id, "object_id")
+        if state is not None and not isinstance(state, dict):
+            raise TypeError("state must be a dict if provided")
+        current = self.objects.setdefault(obj, {})
+        if state:
+            current.update(state)
+        self.entity_map.setdefault(obj, "object")
 
     def set_object_state(self, object_id: str, state: dict) -> None:
         """Merge provided attributes into an object's state."""
