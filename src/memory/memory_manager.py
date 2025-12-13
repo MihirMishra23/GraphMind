@@ -94,23 +94,51 @@ class MemoryManager:
             f"Error when classifying action '{action}' - received {completion=}"
         )
 
+    def _update_location(
+        self, observation: str, navigation_action: str, potential_locations: list
+    ) -> None:
+        """
+        Use the LLM to infer the current location from the observation, update the
+        player's location, and add a directional edge from the previous location.
+        """
+        prompt = (
+            "You are playing a text adventure game."
+            "Identify your current location from this observation.\n"
+            "Only respond with the location name (short word or phrase, normally capitalized), and then the <END> token.\n"
+            f"Observation: {observation}\n"
+            "Based on the given observation, my location is: "
+        )
+        print(f"{prompt=}")
+        completion = self.llm.generate(prompt, max_tokens=16, stop=["<END>"]).strip()
+        print(f"{completion=}")
+        if not completion:
+            raise Exception("Unable to extract location from observation")
+        prev_loc = str(self.memory.player.get("location") or "")
+        self.memory.add_location_node(completion)
+        self.memory.set_player_location(completion)
+        print(f"{prev_loc=}")
+        print(self.memory._snapshot())
+        self.memory.add_location_edge(prev_loc, navigation_action, completion)
+
     def update_memory(self, observation: str, last_action: str) -> None:
         print("=" * 20)
         print("Updating memory")
-        print("Action type is", self._classify_action(last_action))
+        action_type = self._classify_action(last_action)
         entities = self._extract_relevant_entities(observation, last_action)
-        new_locations: list[str] = []
+        locations = []
         for entity in entities:
-            print()
-            print(f"updating memory for {entity=}")
+            # print()
+            # print(f"updating memory for {entity=}")
             entity_type = self._classify_entity(entity)
-            print(f"{entity_type=}")
+            # print(f"{entity_type=}")
             if entity_type == "location":
-                self.memory.add_location_node(entity)
-                new_locations.append(entity)
-                print(self.memory._snapshot())
-        if new_locations:
-            self.memory.set_player_location(new_locations[-1])
+                locations.append(entity)
+            #     self.memory.add_location_node(entity)
+            #     print(self.memory._snapshot())
+        if action_type == "navigation" or "start":
+            self._update_location(observation, last_action, locations)
+        print()
+        print(self.memory._snapshot())
         print("=" * 20)
 
 

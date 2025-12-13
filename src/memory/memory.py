@@ -8,7 +8,7 @@ class Memory:
     """Holds location graph, object state, and player state."""
 
     def __init__(self) -> None:
-        self.locations: dict[str, dict[str, str]] = {}
+        self.locations: dict[str, dict[str, str]] = {"start": {}}
         self.objects: dict[str, dict] = {}
         self.player: dict[str, object] = {"location": "start", "inventory": []}
 
