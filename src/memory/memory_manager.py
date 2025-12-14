@@ -67,11 +67,11 @@ class MemoryManager:
             prompt = (
                 "I want to know the type of the entity. Respond with the correct type of the entity\n"
                 "Respond with exactly one word - location or object.\n\n"
-                "Finish your output with <END>."
-                f"Type of {entity} is "
+                # "Finish your output with <END>."
+                f"Type of {entity}: "
             )
             completion = (
-                self.llm.generate(prompt, max_tokens=4, stop=["<END>"]).strip().lower()
+                self.llm.generate(prompt, max_tokens=4, stop=None).strip().lower()
             )
             if "location" in completion:
                 return "location"
@@ -119,6 +119,41 @@ class MemoryManager:
 
         return self._with_retries(classify, "classify_action")
 
+    def _infer_entity_attributes(
+        self, observation: str, action: str, entity: str, attributes: list[str]
+    ) -> dict[str, Any]:
+        def infer() -> dict[str, Any]:
+            attrs = ", ".join(attributes) if attributes else "none"
+            prompt = (
+                "You are inferring the state of an entity in a text adventure.\n"
+                "Given the last action, observation, and entity, return a JSON object of attribute -> value pairs.\n"
+                "ONLY come up with attributes based on the given information - do NOT make anything up.\n"
+                "Use booleans for on/off, open/closed, locked/unlocked when appropriate. Use numbers or short strings otherwise. If unknown, use null.\n"
+                "End the response with <END> immediately after the JSON.\n\n"
+                f"Entity: {entity}\n"
+                f"Known attributes: {attrs}\n"
+                f"Last action: {action}\n"
+                f"Observation: {observation}\n"
+                "Attributes JSON:"
+            )
+            completion = self.llm.generate(
+                prompt, max_tokens=128, stop=["<END>"]
+            ).strip()
+            print(f"Inferred attributes: {completion}")
+            text = completion.split("<END>", 1)[0].strip()
+            parsed: dict[str, Any] = {}
+            try:
+                parsed_obj = json.loads(text)
+                if isinstance(parsed_obj, dict):
+                    parsed = parsed_obj
+            except Exception:
+                pass
+            if not parsed:
+                raise Exception("Could not parse attributes JSON")
+            return parsed
+
+        return self._with_retries(infer, "infer_entity_attributes")
+
     def _update_location(self, observation: str, navigation_action: str) -> None:
         """
         Use the LLM to infer the current location from the observation, update the
@@ -153,13 +188,32 @@ class MemoryManager:
         action_type = self._classify_action(last_action)
         print(f"action '{last_action}' is of type {action_type}")
         entities = self._extract_relevant_entities(observation, last_action)
-        if action_type in {"navigation", "start"}:
-            self._update_location(observation, last_action)
+        num_locations = 0
         for entity in entities:
-            entity_type = self.memory.entity_map.setdefault(
-                entity, self._classify_entity(entity)
-            )
+            if entity in self.memory.entity_map:
+                entity_type = self.memory.entity_map[entity]
+            else:
+                # add entity to memory
+                entity_type = self._classify_entity(entity)
+                if entity_type == "object":
+                    self.memory.add_object(entity)
+                elif entity_type == "location":
+                    self.memory.add_location_node(entity)
+            if entity_type == "object":
+                current_attrs = list(
+                    (self.memory.get_object_state(entity) or {}).keys()
+                )
+                updates = self._infer_entity_attributes(
+                    observation, last_action, entity, current_attrs
+                )
+                if updates:
+                    self.memory.set_object_state(entity, updates)
             print(f"entity '{entity}' is of type {entity_type}")
+            if entity_type == "location":
+                num_locations += 1
+
+        if action_type in {"navigation", "start"} and num_locations > 0:
+            self._update_location(observation, last_action)
 
         print(self.memory._snapshot())
         print("=" * 20)
