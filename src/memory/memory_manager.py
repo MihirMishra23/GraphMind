@@ -19,6 +19,7 @@ class MemoryManager:
         self._max_retries = 5
         self._graph = Digraph(comment="Memory Snapshots")
         self._graph_nodes: Set[str] = set()
+        self._graph_edges: Set[tuple[str, str, str]] = set()
         self._snapshot_step = 0
         self._graph_dir = Path("out")
         self._graph_dir.mkdir(parents=True, exist_ok=True)
@@ -28,20 +29,13 @@ class MemoryManager:
     ) -> list[str]:
         action_text = last_action or "None"
         prompt = (
-            "Extract distinct entities (objects, locations, items) from the last action and observation.\n"
+            "Extract distinct entities (objects, locations, or items) from the last action and observation.\n"
             "Rules:\n"
-            "- Output only unique entities; never repeat the same entity.\n"
-            "- Make each entity a concise, descriptive noun phrase so it is recognizable, but keep it short.\n"
-            "- Respond with a list of strings.\n"
+            "- Output only unique entities - do NOT repeat entities.\n"
+            "- All entities should be in present in the prompt - do NOT make anything up.\n"
+            "- Make each entity a concise, descriptive noun phrase so it is recognizable (do not include 'the').\n"
+            "- Respond with a list of strings (ex. [answer 1, answer 2, etc.]).\n"
             "- End the response with the stop token <END> immediately after the JSON.\n\n"
-            "Example 1:\n"
-            "Last action: look at the wooden chest\n"
-            "Observation: The wooden chest is open, revealing a rusty iron key inside.\n"
-            'Entities (list): ["wooden chest", "rusty iron key"]<END>\n\n'
-            "Example 2:\n"
-            "Last action: go north\n"
-            "Observation: You enter a stone hallway lined with oil lamps and see a locked oak door ahead.\n"
-            'Entities (list): ["stone hallway", "oil lamps", "locked oak door"]<END>\n'
             f"Last action: {action_text}\n"
             f"Observation: {observation}\n"
             "Entities (list):"
@@ -52,9 +46,17 @@ class MemoryManager:
         try:
             parsed = json.loads(text)
             if isinstance(parsed, list):
-                entities = [str(item).strip() for item in parsed if str(item).strip()]
+                entities = [
+                    str(item).replace("[", "").replace("]", "").strip()
+                    for item in parsed
+                    if str(item).strip()
+                ]
         except Exception:
-            entities = [part.strip() for part in text.split(",") if part.strip()]
+            entities = [
+                part.replace("[", "").replace("]", "").strip()
+                for part in text.split(",")
+                if part.strip()
+            ]
         print(f"{entities=}")
         return entities
 
@@ -78,7 +80,7 @@ class MemoryManager:
                 "Respond with the correct type of the entity\n"
                 "Respond with exactly one word - location or object.\n\n"
                 f"Observation: {observation}"
-                f"Based on the observation, the type of {entity} is "
+                f"Based on the observation, out of object and location, the type of {entity} is "
             )
             completion = (
                 self.llm.generate(prompt, max_tokens=4, stop=None).strip().lower()
@@ -201,9 +203,15 @@ class MemoryManager:
             self._graph.node(curr_hash, label=curr_hash)
             self._graph_nodes.add(curr_hash)
         edge_label = action or "None"
-        edge_name = f"{prev_hash}->{curr_hash}:{self._snapshot_step}"
+        edge_key = (prev_hash, edge_label, curr_hash)
+        if edge_key in self._graph_edges:
+            return
+        self._graph_edges.add(edge_key)
         self._graph.edge(
-            prev_hash, curr_hash, label=edge_label, _attributes={"id": edge_name}
+            prev_hash,
+            curr_hash,
+            label=edge_label,
+            _attributes={"id": f"{prev_hash}->{curr_hash}:{edge_label}"},
         )
 
     def _render_graph(self, step_index: int) -> None:
@@ -247,9 +255,10 @@ class MemoryManager:
                 print(
                     f"entity '{entity}' information: {self.memory.objects.get(entity, {})}"
                 )
-                print(f"UPDATES: {updates}")
+
                 if updates:
-                    self.memory.set_object_state(entity, updates)
+                    if self.memory.set_object_state(entity, updates):
+                        print(f"UPDATES: {updates}")
             print(f"entity '{entity}' is of type {entity_type}")
             if entity_type == "location":
                 num_locations += 1
