@@ -44,10 +44,9 @@ def run_episode(
 
     trajectory: List[Dict[str, Any]] = []
 
-    agent.observe(observation)
-
     for step in range(1, max_steps):
         valid_actions = env.get_valid_actions()
+        agent.observe(observation)
         if manual:
             print("\n--- Manual step ---")
             print(f"Observation:\n{observation}")
@@ -63,11 +62,8 @@ def run_episode(
             action = agent.act(observation, valid_actions, override=action)
         else:
             action = agent.act(observation, valid_actions)
-        if action is None:
-            break
 
         observation, reward, done, info = env.step(action)
-        agent.observe(observation)
 
         record = {
             "step": step,
@@ -80,7 +76,7 @@ def run_episode(
         trajectory.append(record)
 
         if verbose:
-            print(f"Step {step}: action {action}")
+            print(f"Step {step}: action '{action}' {valid_actions}")
             print((observation, info))
 
         if done:
@@ -110,7 +106,9 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--game",
         type=Path,
-        default=Path("data/jericho/z-machine-games-master/jericho-game-suite/zork1.z5"),
+        default=Path(
+            "data/jericho/z-machine-games-master/jericho-game-suite/wishbringer.z3"
+        ),
         help="Path to the .z machine file",
     )
     parser.add_argument(
