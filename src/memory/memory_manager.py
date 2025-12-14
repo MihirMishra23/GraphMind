@@ -3,7 +3,10 @@ from __future__ import annotations
 """Lightweight memory manager for extracting entities from observations."""
 
 import json
-from typing import Optional, Literal, Any
+from pathlib import Path
+from typing import Optional, Literal, Any, Set
+
+from graphviz import Digraph
 
 from llm import LLM
 from memory import Memory
@@ -13,7 +16,12 @@ class MemoryManager:
     def __init__(self, llm: LLM) -> None:
         self.llm = llm
         self.memory = Memory()
-        self._max_retries = 3
+        self._max_retries = 5
+        self._graph = Digraph(comment="Memory Snapshots")
+        self._graph_nodes: Set[str] = set()
+        self._snapshot_step = 0
+        self._graph_dir = Path("out")
+        self._graph_dir.mkdir(parents=True, exist_ok=True)
 
     def _extract_relevant_entities(
         self, observation: str, last_action: str
@@ -62,13 +70,15 @@ class MemoryManager:
             raise last_exc
         raise RuntimeError(f"Failed to complete {desc}")
 
-    def _classify_entity(self, entity) -> Literal["location", "object"]:
+    def _classify_entity(
+        self, entity: str, observation: str
+    ) -> Literal["location", "object"]:
         def classify() -> Literal["location", "object"]:
             prompt = (
-                "I want to know the type of the entity. Respond with the correct type of the entity\n"
+                "Respond with the correct type of the entity\n"
                 "Respond with exactly one word - location or object.\n\n"
-                # "Finish your output with <END>."
-                f"Type of {entity}: "
+                f"Observation: {observation}"
+                f"Based on the observation, the type of {entity} is "
             )
             completion = (
                 self.llm.generate(prompt, max_tokens=4, stop=None).strip().lower()
@@ -94,6 +104,7 @@ class MemoryManager:
                 "I want to know the type of the action. Respond with the correct type of the action.\n"
                 "There are 3 types: navigation (movement like go north, enter), manipulation (interacting with objects like open door, take key), perception (observing like look, examine, inventory).\n"
                 "Respond with exactly one of: navigation, manipulation, perception.\n\n"
+                "Make sure that you are confident about your answers"
                 "Finish your output with <END>"
                 "Example 1:\n"
                 "Type of action 'go north' is navigation<END>\n\n"
@@ -125,7 +136,7 @@ class MemoryManager:
         def infer() -> dict[str, Any]:
             attrs = ", ".join(attributes) if attributes else "none"
             prompt = (
-                "You are inferring the state of an entity in a text adventure.\n"
+                "You are extracting the state of an entity in a text adventure.\n"
                 "Given the last action, observation, and entity, return a JSON object of attribute -> value pairs.\n"
                 "ONLY come up with attributes based on the given information - do NOT make anything up.\n"
                 "Use booleans for on/off, open/closed, locked/unlocked when appropriate. Use numbers or short strings otherwise. If unknown, use null.\n"
@@ -139,7 +150,6 @@ class MemoryManager:
             completion = self.llm.generate(
                 prompt, max_tokens=128, stop=["<END>"]
             ).strip()
-            print(f"Inferred attributes: {completion}")
             text = completion.split("<END>", 1)[0].strip()
             parsed: dict[str, Any] = {}
             try:
@@ -168,9 +178,7 @@ class MemoryManager:
                 f"Observation: {observation}\n"
                 "Based on the given observation, my location is: "
             )
-            print(f"{prompt=}")
             completion = self.llm.generate(prompt, max_tokens=6, stop=["<END>"]).strip()
-            print(f"{completion=}")
             if not completion:
                 raise Exception("Unable to extract location from observation")
             return completion
@@ -179,12 +187,42 @@ class MemoryManager:
         prev_loc = str(self.memory.player.get("location") or "")
         self.memory.add_location_node(location_name)
         self.memory.set_player_location(location_name)
-        print(f"{prev_loc=}")
         self.memory.add_location_edge(prev_loc, navigation_action, location_name)
+        print(f"UPDATED location from '{prev_loc}' to '{location_name}'")
+
+    def _add_snapshot_transition(
+        self, prev_hash: str, curr_hash: str, action: str
+    ) -> None:
+        """Add nodes/edge to the snapshot graph (allows self-loops)."""
+        if prev_hash not in self._graph_nodes:
+            self._graph.node(prev_hash, label=prev_hash)
+            self._graph_nodes.add(prev_hash)
+        if curr_hash not in self._graph_nodes:
+            self._graph.node(curr_hash, label=curr_hash)
+            self._graph_nodes.add(curr_hash)
+        edge_label = action or "None"
+        edge_name = f"{prev_hash}->{curr_hash}:{self._snapshot_step}"
+        self._graph.edge(
+            prev_hash, curr_hash, label=edge_label, _attributes={"id": edge_name}
+        )
+
+    def _render_graph(self, step_index: int) -> None:
+        """Render the current graph snapshot for the given step index."""
+        filename = self._graph_dir / f"memory_graph_step_{step_index}"
+        try:
+            self._graph.render(
+                filename=str(filename),
+                format="png",
+                cleanup=True,
+                view=False,
+            )
+        except Exception as exc:  # pragma: no cover - best effort logging
+            print(f"Graph render failed at step {step_index}: {exc}")
 
     def update_memory(self, observation: str, last_action: str) -> None:
         print("=" * 20)
         print("Updating memory")
+        prev_hash = str(hash(self.memory))
         action_type = self._classify_action(last_action)
         print(f"action '{last_action}' is of type {action_type}")
         entities = self._extract_relevant_entities(observation, last_action)
@@ -194,7 +232,7 @@ class MemoryManager:
                 entity_type = self.memory.entity_map[entity]
             else:
                 # add entity to memory
-                entity_type = self._classify_entity(entity)
+                entity_type = self._classify_entity(entity, observation)
                 if entity_type == "object":
                     self.memory.add_object(entity)
                 elif entity_type == "location":
@@ -206,6 +244,10 @@ class MemoryManager:
                 updates = self._infer_entity_attributes(
                     observation, last_action, entity, current_attrs
                 )
+                print(
+                    f"entity '{entity}' information: {self.memory.objects.get(entity, {})}"
+                )
+                print(f"UPDATES: {updates}")
                 if updates:
                     self.memory.set_object_state(entity, updates)
             print(f"entity '{entity}' is of type {entity_type}")
@@ -215,6 +257,12 @@ class MemoryManager:
         if action_type in {"navigation", "start"} and num_locations > 0:
             self._update_location(observation, last_action)
 
+        curr_hash = str(hash(self.memory))
+        self._add_snapshot_transition(prev_hash, curr_hash, last_action)
+        self._render_graph(self._snapshot_step)
+        self._snapshot_step += 1
+
+        print("SNAPSHOT:")
         print(self.memory._snapshot())
         print("=" * 20)
         print()
