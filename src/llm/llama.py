@@ -42,6 +42,8 @@ class LlamaLLM(LLM):
             pad_token_id=self.tokenizer.eos_token_id,
             return_full_text=False,
             do_sample=True,
+            temperature=0.2,
+            top_p=0.9,
         )
         text = outputs[0]["generated_text"]
         completion = text
