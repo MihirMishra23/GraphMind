@@ -70,11 +70,7 @@ class GraphMindAgent(BaseAgent):
             recent_lines,
             action_candidates=unseen_candidates or action_candidates,
         )
-        action = self._avoid_recent_repeat(action, action_candidates, observation)
-
-        # Record action for this state
-        tried = self._state_actions.setdefault(current_state, set())
-        tried.add(action.lower())
+        # action = self._avoid_recent_repeat(action, action_candidates, observation)
 
         self._last_action = action
         return action or "look"
@@ -83,31 +79,48 @@ class GraphMindAgent(BaseAgent):
         self,
         obs: str,
         recent_history: list[str],
-        action_candidates: Optional[Sequence[str]] = None,
+        action_candidates: list[str],
     ) -> str:
-        history_block = (
-            "\n".join(recent_history[-self.history_horizon :])
-            if recent_history
-            else "None"
-        )
+        snapshot = self.memory_manager.memory.to_dict()
+        player = snapshot.get("player", {})
+        location = player.get("location")
+        inventory = player.get("inventory", [])
+        locations = list(snapshot.get("locations", {}).keys())
+        objects = snapshot.get("objects", {})
+        entities_context = self.memory_manager.get_recent_entities_context()
         prompt = (
             f"{self.system_prompt}\n\n"
-            f"Recent history:\n{history_block}\n\n"
+            "Use the current world state to decide the next action.\n"
+            f"Player location: {location}\n"
+            f"Inventory: {inventory}\n"
+            f"Known locations: {locations}\n"
+            f"Known objects and states: {objects}\n"
             f"Latest observation:\n{obs}\n\n"
-            f"Next action (one command):"
+            "Think step by step, then output exactly one action.\n"
+            "Format:\n"
+            "Reasoning:\n"
+            "<start> your action <end>\n\n\n"
         )
         completion = self.llm.generate(
             prompt,
-            max_tokens=32,
-            stop=["\n"],
+            max_tokens=256,
+            stop=["<end>"],
         )
-        completion = completion.strip()
-        if not action_candidates:
-            return completion
+        text = completion.strip()
 
-        lines = completion.splitlines()
-        cleaned = lines[0] if lines else ""
+        lower_text = text.lower()
+        start_idx = lower_text.find("<start>")
+        if start_idx != -1:
+            cleaned = text[start_idx + len("<start>") :].strip()
+        else:
+            lines = [ln.strip() for ln in text.splitlines() if ln.strip()]
+            cleaned = lines[0] if lines else ""
+
         cleaned_lower = cleaned.lower()
+        print()
+        print(f"{cleaned_lower=}")
+        print()
+        return cleaned_lower
         # Exact match
         for cand in action_candidates:
             if cleaned_lower == cand.lower():
