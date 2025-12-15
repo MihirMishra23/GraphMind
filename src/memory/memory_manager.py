@@ -29,8 +29,9 @@ class MemoryManager:
     ) -> list[str]:
         action_text = last_action or "None"
         prompt = (
-            "Extract distinct entities (objects, locations, or items) from the action and observation.\n"
+            "Extract distinct entities from the action and observation.\n"
             "Rules:\n"
+            "- An entity is either an object, location, or person"
             "- Output only unique entities - do NOT repeat entities.\n"
             "- All entities should be in present in the prompt - do NOT make anything up.\n"
             "- Make each entity a concise, descriptive noun phrase so it is recognizable (do not include 'the').\n"
@@ -220,6 +221,19 @@ class MemoryManager:
         except Exception as exc:  # pragma: no cover - best effort logging
             print(f"Graph render failed at step {step_index}: {exc}")
 
+    def _export_state_components(self, step_index: int) -> None:
+        """Export locations graph, player, and objects to JSON files."""
+        snapshot = self.memory.to_dict()
+        (self._graph_dir / f"locations_step_{step_index}.json").write_text(
+            json.dumps(snapshot.get("locations", {}), indent=2)
+        )
+        (self._graph_dir / f"player_step_{step_index}.json").write_text(
+            json.dumps(snapshot.get("player", {}), indent=2)
+        )
+        (self._graph_dir / f"objects_step_{step_index}.json").write_text(
+            json.dumps(snapshot.get("objects", {}), indent=2)
+        )
+
     def update_memory(self, observation: str, last_action: str) -> None:
         print("=" * 20)
         print("Updating memory")
@@ -262,6 +276,7 @@ class MemoryManager:
         curr_hash = str(hash(self.memory))
         self._add_snapshot_transition(prev_hash, curr_hash, last_action)
         self._render_graph(self._snapshot_step)
+        self._export_state_components(self._snapshot_step)
         self._snapshot_step += 1
 
         print("SNAPSHOT:")
