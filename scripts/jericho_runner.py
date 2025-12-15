@@ -86,7 +86,11 @@ def run_episode(
 
 
 def save_logs(
-    text_log: Optional[Path], json_log: Optional[Path], trajectory: List[Dict[str, Any]]
+    text_log: Optional[Path],
+    json_log: Optional[Path],
+    trajectory: List[Dict[str, Any]],
+    agent_name: str = "",
+    env_path: Optional[Path] = None,
 ) -> None:
     if text_log:
         lines = []
@@ -99,6 +103,17 @@ def save_logs(
 
     if json_log:
         json_log.write_text(json.dumps(trajectory, indent=2))
+
+    # Always emit a timestep-reward CSV for plotting later.
+    out_dir = Path("results")
+    out_dir.mkdir(parents=True, exist_ok=True)
+    reward_lines = ["step,reward"]
+    for row in trajectory:
+        reward_lines.append(f"{row['step']},{row['reward']}")
+    env_name = Path(env_path).stem if env_path else "env"
+    agent_tag = agent_name or "agent"
+    reward_file = out_dir / f"rewards_{env_name}_{agent_tag}.csv"
+    reward_file.write_text("\n".join(reward_lines))
 
 
 def parse_args() -> argparse.Namespace:
@@ -214,7 +229,13 @@ def main() -> None:
         verbose=not args.quiet,
         manual=args.manual,
     )
-    save_logs(args.text_log, args.json_log, trajectory)
+    save_logs(
+        args.text_log,
+        args.json_log,
+        trajectory,
+        agent_name=args.agent,
+        env_path=args.game,
+    )
 
 
 if __name__ == "__main__":
