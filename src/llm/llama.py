@@ -17,14 +17,14 @@ class LlamaLLM(LLM):
         **kwargs,
     ) -> None:
         self.tokenizer = AutoTokenizer.from_pretrained(model_id)
+        model = AutoModelForCausalLM.from_pretrained(
+            model_id, torch_dtype="float32", device_map=device_map
+        )
         self.generator = pipeline(
             "text-generation",
-            model=AutoModelForCausalLM.from_pretrained(
-                model_id, dtype=dtype, device_map=device_map
-            ),
+            model=model,
             tokenizer=self.tokenizer,
             device_map=device_map,
-            dtype=dtype,
             **kwargs,
         )
 
