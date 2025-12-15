@@ -43,6 +43,19 @@ class MemoryManager:
         )
         completion = self.llm.generate(prompt, max_tokens=96, stop=["<END>"])
         text = completion.split("<END>", 1)[0].strip()
+        print(f"{text=}")
+        prompt = (
+            "Extract the unique entities from the list of raw entities. Note there might be duplicates\n"
+            "Rules:\n"
+            "- Output only unique entities - do NOT repeat entities.\n"
+            "- Only output the entity names as a comma-separated list of strings.\n"
+            "- End the response with the stop token <END>.\n\n"
+            f"Entities: {completion}\n"
+            "Unique Entities (list): "
+        )
+        completion = self.llm.generate(prompt, max_tokens=96, stop=["<END>"])
+
+        text = completion.split("<END>", 1)[0].strip()
         entities: list[str] = []
         try:
             parsed = json.loads(text)
@@ -58,8 +71,9 @@ class MemoryManager:
                 for part in text.split(",")
                 if part.strip()
             ]
+        entities = list(set(entities))
         print(f"{entities=}")
-        return list(set(entities))
+        return entities
 
     def _with_retries(self, fn, desc: str):
         last_exc: Optional[Exception] = None
@@ -222,11 +236,28 @@ class MemoryManager:
             print(f"Graph render failed at step {step_index}: {exc}")
 
     def _export_state_components(self, step_index: int) -> None:
-        """Export locations graph, player, and objects to JSON files."""
+        """Export locations graph (graphviz) plus player/objects JSON."""
         snapshot = self.memory.to_dict()
-        (self._graph_dir / f"locations_step_{step_index}.json").write_text(
-            json.dumps(snapshot.get("locations", {}), indent=2)
-        )
+
+        # Locations graph via Graphviz
+        loc_graph = Digraph(comment=f"Locations step {step_index}")
+        for loc in snapshot.get("locations", {}):
+            loc_graph.node(loc, label=loc)
+        for src, neighbors in snapshot.get("locations", {}).items():
+            if isinstance(neighbors, dict):
+                for direction, dest in neighbors.items():
+                    loc_graph.edge(src, dest, label=direction)
+        try:
+            loc_graph.render(
+                filename=str(self._graph_dir / f"locations_step_{step_index}"),
+                format="png",
+                cleanup=True,
+                view=False,
+            )
+        except Exception as exc:  # pragma: no cover - best effort
+            print(f"Location graph render failed at step {step_index}: {exc}")
+
+        # Player and objects as JSON
         (self._graph_dir / f"player_step_{step_index}.json").write_text(
             json.dumps(snapshot.get("player", {}), indent=2)
         )
