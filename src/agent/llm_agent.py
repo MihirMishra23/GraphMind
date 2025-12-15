@@ -70,29 +70,38 @@ class LLMAgent(BaseAgent):
         recent_history: list[str],
         action_candidates: Optional[Sequence[str]] = None,
     ) -> str:
-        history_block = (
-            "\n".join(recent_history[-self.history_horizon :])
-            if recent_history
-            else "None"
-        )
+        history_block = "\n".join(recent_history[-self.history_horizon :])
         prompt = (
             f"{self.system_prompt}\n\n"
+            "Use recent history and the latest observation to decide the next action.\n"
             f"Recent history:\n{history_block}\n\n"
             f"Latest observation:\n{obs}\n\n"
-            f"Next action (one command):"
+            "Think step by step, then output exactly one action.\n"
+            "Format:\n"
+            "Reasoning:\n"
+            "<start> your action <end>\n\n"
         )
         completion = self.llm.generate(
             prompt,
-            max_tokens=32,
-            stop=["\n"],
+            max_tokens=256,
+            stop=["<end>"],
         )
         completion = completion.strip()
+        print(f"{completion=}")
         if not action_candidates:
             return completion
 
-        lines = completion.splitlines()
-        cleaned = lines[0] if lines else ""
+        # Extract between <start> ... <end> if present; otherwise first non-empty line.
+        lower_text = completion.lower()
+        start_idx = lower_text.find("<start>")
+        if start_idx != -1:
+            cleaned = completion[start_idx + len("<start>") :].strip()
+        else:
+            lines = [ln.strip() for ln in completion.splitlines() if ln.strip()]
+            cleaned = lines[0] if lines else ""
+
         cleaned_lower = cleaned.lower()
+        return cleaned_lower
         # Exact match
         for cand in action_candidates:
             if cleaned_lower == cand.lower():
