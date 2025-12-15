@@ -40,6 +40,7 @@ class GraphMindAgent(BaseAgent):
         self.history_horizon = history_horizon
         self._last_action: str = "start"
         self.memory_manager = MemoryManager(llm)
+        self._state_actions: dict[str, set[str]] = {}
 
     def reset(self, env: object) -> None:
         super().reset(env)
@@ -57,12 +58,24 @@ class GraphMindAgent(BaseAgent):
             self._last_action = override
             return override
         recent_lines = self._get_recent_history_lines(self.history_horizon)
+
+        current_state = str(hash(self.memory_manager.memory))
+        tried_actions = self._state_actions.get(current_state, set())
+        unseen_candidates = [
+            cand for cand in action_candidates if cand.lower() not in tried_actions
+        ]
+
         action = self.propose_action(
             observation,
             recent_lines,
-            action_candidates=action_candidates,
+            action_candidates=unseen_candidates or action_candidates,
         )
         action = self._avoid_recent_repeat(action, action_candidates, observation)
+
+        # Record action for this state
+        tried = self._state_actions.setdefault(current_state, set())
+        tried.add(action.lower())
+
         self._last_action = action
         return action or "look"
 
