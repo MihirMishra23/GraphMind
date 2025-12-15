@@ -23,6 +23,7 @@ class MemoryManager:
         self._snapshot_step = 0
         self._graph_dir = Path("out")
         self._graph_dir.mkdir(parents=True, exist_ok=True)
+        self._last_entities: list[str] = []
 
     def _extract_relevant_entities(
         self, observation: str, last_action: str
@@ -272,6 +273,7 @@ class MemoryManager:
         action_type = self._classify_action(last_action)
         print(f"action '{last_action}' is of type {action_type}")
         entities = self._extract_relevant_entities(observation, last_action)
+        self._last_entities = entities
         num_locations = 0
         for entity in entities:
             if entity in self.memory.entity_map:
@@ -314,6 +316,21 @@ class MemoryManager:
         print(self.memory._snapshot())
         print("=" * 20)
         print()
+
+    def get_recent_entities_context(self) -> list[dict[str, Any]]:
+        """Return context for the most recently extracted entities."""
+        context: list[dict[str, Any]] = []
+        for ent in self._last_entities:
+            entry: dict[str, Any] = {"name": ent}
+            ent_type = self.memory.entity_map.get(ent)
+            if ent_type:
+                entry["type"] = ent_type
+                if ent_type == "object":
+                    entry["state"] = self.memory.get_object_state(ent) or {}
+                if ent_type == "location":
+                    entry["neighbors"] = self.memory.neighbors(ent)
+            context.append(entry)
+        return context
 
 
 __all__ = ["MemoryManager"]
