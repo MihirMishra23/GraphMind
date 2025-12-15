@@ -48,6 +48,7 @@ class MemoryManager:
         prompt = (
             "Extract the unique entities from the list of raw entities. Note there might be duplicates\n"
             "Rules:\n"
+            "- An entity must be an object or location present in the given entities list.\n"
             "- Output only unique entities - do NOT repeat entities.\n"
             "- Only output the entity names as a comma-separated list of strings.\n"
             "- End the response with the stop token <END>.\n\n"
@@ -276,32 +277,35 @@ class MemoryManager:
         self._last_entities = entities
         num_locations = 0
         for entity in entities:
-            if entity in self.memory.entity_map:
-                entity_type = self.memory.entity_map[entity]
-            else:
-                # add entity to memory
-                entity_type = self._classify_entity(entity, observation)
+            try:
+                if entity in self.memory.entity_map:
+                    entity_type = self.memory.entity_map[entity]
+                else:
+                    # add entity to memory
+                    entity_type = self._classify_entity(entity, observation)
+                    if entity_type == "object":
+                        self.memory.add_object(entity)
+                    elif entity_type == "location":
+                        self.memory.add_location_node(entity)
                 if entity_type == "object":
-                    self.memory.add_object(entity)
-                elif entity_type == "location":
-                    self.memory.add_location_node(entity)
-            if entity_type == "object":
-                current_attrs = list(
-                    (self.memory.get_object_state(entity) or {}).keys()
-                )
-                updates = self._infer_entity_attributes(
-                    observation, last_action, entity, current_attrs
-                )
-                print(
-                    f"entity '{entity}' information: {self.memory.objects.get(entity, {})}"
-                )
+                    current_attrs = list(
+                        (self.memory.get_object_state(entity) or {}).keys()
+                    )
+                    updates = self._infer_entity_attributes(
+                        observation, last_action, entity, current_attrs
+                    )
+                    print(
+                        f"entity '{entity}' information: {self.memory.objects.get(entity, {})}"
+                    )
 
-                if updates:
-                    if self.memory.set_object_state(entity, updates):
-                        print(f"UPDATES: {updates}")
-            print(f"entity '{entity}' is of type {entity_type}")
-            if entity_type == "location":
-                num_locations += 1
+                    if updates:
+                        if self.memory.set_object_state(entity, updates):
+                            print(f"UPDATES: {updates}")
+                print(f"entity '{entity}' is of type {entity_type}")
+                if entity_type == "location":
+                    num_locations += 1
+            except Exception as e:
+                print(e)
 
         if action_type in {"navigation", "start"} and num_locations > 0:
             self._update_location(observation, last_action)
