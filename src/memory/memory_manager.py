@@ -29,14 +29,14 @@ class MemoryManager:
     ) -> list[str]:
         action_text = last_action or "None"
         prompt = (
-            "Extract distinct entities (objects, locations, or items) from the last action and observation.\n"
+            "Extract distinct entities (objects, locations, or items) from the action and observation.\n"
             "Rules:\n"
             "- Output only unique entities - do NOT repeat entities.\n"
             "- All entities should be in present in the prompt - do NOT make anything up.\n"
             "- Make each entity a concise, descriptive noun phrase so it is recognizable (do not include 'the').\n"
             "- Respond with a list of strings (ex. [answer 1, answer 2, etc.]).\n"
-            "- End the response with the stop token <END> immediately after the JSON.\n\n"
-            f"Last action: {action_text}\n"
+            "- End the response with the stop token <END>.\n\n"
+            f"Action: {action_text}\n"
             f"Observation: {observation}\n"
             "Entities (list):"
         )
@@ -58,7 +58,7 @@ class MemoryManager:
                 if part.strip()
             ]
         print(f"{entities=}")
-        return entities
+        return list(set(entities))
 
     def _with_retries(self, fn, desc: str):
         last_exc: Optional[Exception] = None
@@ -108,13 +108,6 @@ class MemoryManager:
                 "Respond with exactly one of: navigation, manipulation, perception.\n\n"
                 "Make sure that you are confident about your answers"
                 "Finish your output with <END>"
-                "Example 1:\n"
-                "Type of action 'go north' is navigation<END>\n\n"
-                "Example 2:\n"
-                "Type of action 'open the mailbox' is manipulation<END>\n\n"
-                "Example 3:\n"
-                "Type of action 'look around' is perception<END>\n\n"
-                "Example 4:\n"
                 f"Type of action '{action}' is "
             )
             completion = (
