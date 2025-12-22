@@ -18,7 +18,7 @@ class LlamaLLM(LLM):
     ) -> None:
         self.tokenizer = AutoTokenizer.from_pretrained(model_id)
         model = AutoModelForCausalLM.from_pretrained(
-            model_id, torch_dtype="float32", device_map=device_map
+            model_id, torch_dtype=dtype, device_map=device_map
         )
         self.generator = pipeline(
             "text-generation",
@@ -34,8 +34,16 @@ class LlamaLLM(LLM):
         max_tokens: int = 1024,
         stop: Optional[Iterable[str]] = None,
     ) -> str:
+        messages = [
+            {"role": "user", "content": prompt}
+        ]
+        formatted_prompt = self.tokenizer.apply_chat_template(
+            messages, 
+            tokenize=False, 
+            add_generation_prompt=True
+        )
         outputs = self.generator(
-            prompt,
+            formatted_prompt,
             max_new_tokens=max_tokens,
             num_return_sequences=1,
             eos_token_id=self.tokenizer.eos_token_id,
