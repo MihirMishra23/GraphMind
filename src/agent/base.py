@@ -44,5 +44,5 @@ class BaseAgent(ABC):
         lines: list[str] = []
         for step in self._recent_steps[-horizon:]:
             lines.append(f"Action: {step['action']}")
-            lines.append(f"Observation: {step['observation']}")
+            lines.append(f"Resulting Observation: {step['observation']}")
         return lines

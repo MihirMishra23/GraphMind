@@ -8,22 +8,52 @@ from llm import LLM
 from .base import BaseAgent
 
 
-DEFAULT_SYSTEM_PROMPT = """You are playing a classic text-based interactive fiction game. Your goal is to explore, solve puzzles, collect treasures, and win.
+# DEFAULT_SYSTEM_PROMPT = """You are playing a text adventure game. You are the PLAYER.
+# Your goal is to win the game.
+
+# RULES:
+# 1. Do NOT act as a narrator or guide.
+# 2. Do NOT output "Example:" or "Note:".
+# 3. Output your reasoning, then the final command wrapped in <start> and <end>.
+
+# EXAMPLES:
+
+# Observation: You are in a dark room.
+# <start> look <end>
+
+# Observation: A mailbox is here.
+# Reasoning: I should check the mail.
+# <start> open mailbox <end>
+
+# Your turn:"""
+
+DEFAULT_SYSTEM_PROMPT = """You are playing a classic text-based interactive fiction game. Your goal is to explore, solve puzzles, collect treasures, and win. You are the PLAYER.
 
 Each turn you receive:
-- Recent history (last ~10 turns) of actions and observations.
-- The latest observation resulting from your last action.
+- Recent history (last 8 turns) of actions and observations, including the latest observation resulting from your last action.
 
 Your task:
 - Think step by step about the best next action using the latest observation, last action, and recent history.
 - If unsure, prefer exploring new states (e.g., new directions, inspecting new objects, or using “look”/“inventory”) rather than repeating loops.
 - Avoid random or purposeless moves; favor progress toward exploration and puzzles.
-- After reasoning, output exactly ONE concise game command (1–3 words).
+- After reasoning, output exactly ONE concise game command (1-3 words).
 
 Output format:
-- Include your reasoning.
-- End with the final command wrapped exactly as:
+- Include your reasoning. Keep your reasoning within a few sentences.
+- Write with the final command wrapped exactly as:
   <start> your command <end>"""
+
+# EXAMPLES:
+
+# Observation: You are in a dark room.
+# Valid Actions: look, wait
+# Reasoning: Looking lets us explore.
+# <start> look <end>
+
+# Observation: A mailbox is here.
+# Valid Actions: open mailbox, do nothing, leave
+# Reasoning: I should check the mail.
+# <start> open mailbox <end>"""
 
 
 class LLMAgent(BaseAgent):
@@ -31,19 +61,25 @@ class LLMAgent(BaseAgent):
         self,
         llm: LLM,
         system_prompt: str = DEFAULT_SYSTEM_PROMPT,
-        history_horizon: int = 5,
+        history_horizon: int = 8,
     ) -> None:
         super().__init__()
         self.llm = llm
         self.system_prompt = system_prompt
         self.history_horizon = history_horizon
-        self._last_action: Optional[str] = None
+        self._last_action: str = "start"
 
     def reset(self, env: object) -> None:
         super().reset(env)
+        self._last_action = "start"
 
     def observe(self, observation: str) -> None:
-        pass
+        # If we have performed an action previously, record the result
+        if self._last_action is not None:
+            self._recent_steps.append({
+                "action": self._last_action,
+                "observation": observation,
+            })
 
     def act(
         self,
@@ -70,23 +106,35 @@ class LLMAgent(BaseAgent):
         recent_history: list[str],
         action_candidates: Optional[Sequence[str]] = None,
     ) -> str:
-        history_block = "\n".join(recent_history[-self.history_horizon :])
+        history_block = "\n".join(recent_history[-self.history_horizon*2 :])
+        # assert self.history_horizon == 8
+        candidates_str = ""
+        if action_candidates:
+             candidates_str = "\nCurrent Valid Actions: " + ", ".join(action_candidates)
         prompt = (
             f"{self.system_prompt}\n\n"
             "Use recent history and the latest observation to decide the next action.\n"
             f"Recent history:\n{history_block}\n\n"
-            f"Latest observation:\n{obs}\n\n"
-            "Think step by step, then output exactly one action.\n"
+            f"The last action-observation pair is your latest action taken and the current/latest observation resulting from that action.\n"
+            # f"Latest observation:\n{obs}\n"
+            f"{candidates_str}\n\n"
+            "Think step by step, then output one action that is exactly letter for letter the same as one of the valid actions (nothing more, nothing less).\n"
             "Format:\n"
-            "Reasoning:\n"
+            "Reasoning: your reasoning\n"
             "<start> your action <end>\n\n"
         )
+
+        print(f"\n[DEBUG] PROMPT SENT TO LLM:\n...{prompt}\n")
+
         completion = self.llm.generate(
             prompt,
             max_tokens=256,
             stop=["<end>"],
         )
         completion = completion.strip()
+
+        print(f"[DEBUG] RAW LLM OUTPUT:\n{completion}\n")
+
         print(f"{completion=}")
         if not action_candidates:
             return completion
@@ -95,7 +143,16 @@ class LLMAgent(BaseAgent):
         lower_text = completion.lower()
         start_idx = lower_text.find("<start>")
         if start_idx != -1:
-            cleaned = completion[start_idx + len("<start>") :].strip()
+            # cleaned = completion[start_idx + len("<start>") :].strip()
+            # 1. Get the text strictly AFTER <start>
+            content = completion[start_idx + len("<start>") :]
+            
+            # 2. Find <end> within that content and slice it off
+            end_idx = content.lower().find("<end>")
+            if end_idx != -1:
+                content = content[:end_idx]
+            
+            cleaned = content.strip()
         else:
             lines = [ln.strip() for ln in completion.splitlines() if ln.strip()]
             cleaned = lines[0] if lines else ""

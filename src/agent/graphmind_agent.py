@@ -9,22 +9,34 @@ from .base import BaseAgent
 from memory.memory_manager import MemoryManager
 
 
-DEFAULT_SYSTEM_PROMPT = """You are playing a classic text-based interactive fiction game. Your goal is to explore, solve puzzles, collect treasures, and win.
+DEFAULT_SYSTEM_PROMPT = """You are playing a classic text-based interactive fiction game. Your goal is to explore, solve puzzles, collect treasures, and win. You are the PLAYER.
 
 Each turn you receive:
-- Recent history (last ~10 turns) of actions and observations.
-- The latest observation resulting from your last action.
+- Recent history (last 8 turns) of actions and observations, including the latest observation resulting from your last action.
+- The current known state of the world gathered from prior interactions
 
 Your task:
 - Think step by step about the best next action using the latest observation, last action, and recent history.
 - If unsure, prefer exploring new states (e.g., new directions, inspecting new objects, or using “look”/“inventory”) rather than repeating loops.
 - Avoid random or purposeless moves; favor progress toward exploration and puzzles.
-- After reasoning, output exactly ONE concise game command (1–3 words).
+- After reasoning, output exactly ONE concise game command (1-3 words).
 
 Output format:
-- Include your reasoning.
+- Include your reasoning. Keep your reasoning within a few sentences.
 - End with the final command wrapped exactly as:
   <start> your command <end>"""
+
+# EXAMPLES:
+
+# Observation: You are in a dark room.
+# Valid Actions: look, wait
+# Reasoning: Looking lets us explore.
+# <start> look <end>
+
+# Observation: A mailbox is here.
+# Valid Actions: open mailbox, do nothing, leave
+# Reasoning: I should check the mail.
+# <start> open mailbox <end>"""
 
 
 class GraphMindAgent(BaseAgent):
@@ -32,7 +44,7 @@ class GraphMindAgent(BaseAgent):
         self,
         llm: LLM,
         system_prompt: str = DEFAULT_SYSTEM_PROMPT,
-        history_horizon: int = 5,
+        history_horizon: int = 8,
     ) -> None:
         super().__init__()
         self.llm = llm
@@ -44,9 +56,15 @@ class GraphMindAgent(BaseAgent):
 
     def reset(self, env: object) -> None:
         super().reset(env)
+        self._last_action = "start"
 
     def observe(self, observation: str):
         self.memory_manager.update_memory(observation, self._last_action)
+        if self._last_action:
+             self._recent_steps.append({
+                 "action": self._last_action,
+                 "observation": observation,
+             })
 
     def act(
         self,
@@ -81,6 +99,7 @@ class GraphMindAgent(BaseAgent):
         recent_history: list[str],
         action_candidates: list[str],
     ) -> str:
+        history_block = "\n".join(recent_history[-self.history_horizon*2 :])
         snapshot = self.memory_manager.memory.to_dict()
         player = snapshot.get("player", {})
         location = player.get("location")
@@ -88,19 +107,30 @@ class GraphMindAgent(BaseAgent):
         locations = list(snapshot.get("locations", {}).keys())
         objects = snapshot.get("objects", {})
         entities_context = self.memory_manager.get_recent_entities_context()
+        candidates_str = ""
+        if action_candidates:
+             candidates_str = "\nCurrent Valid Actions: " + ", ".join(action_candidates)
         prompt = (
             f"{self.system_prompt}\n\n"
-            "Use the current world state to decide the next action.\n"
+            "Use the current world state and history to decide the next action.\n"
+            # "Here is the recent history:\n"
+            f"Here is the recent history:\n{history_block}\n\n"
+            f"The last action-observation pair is your latest action taken and the current/latest observation resulting from that action.\n"
+            "Here is the current known world state roughly gathered from prior interactions:\n"
             f"Player location: {location}\n"
             f"Inventory: {inventory}\n"
             f"Known locations: {locations}\n"
             f"Known objects and states: {objects}\n"
-            f"Latest observation:\n{obs}\n\n"
-            "Think step by step, then output exactly one action.\n"
+            f"Latest observation reminder:\n{obs}\n"
+            f"{candidates_str}\n\n"
+            "Think step by step, then output one action that is exactly letter for letter the same as one of the valid actions (nothing more, nothing less).\n"
             "Format:\n"
-            "Reasoning:\n"
-            "<start> your action <end>\n\n\n"
+            "Reasoning: your reasoning\n"
+            "<start> your action <end>\n\n"
         )
+
+        print(f"\n[DEBUG] PROMPT SENT TO LLM:\n...{prompt}\n")
+
         completion = self.llm.generate(
             prompt,
             max_tokens=256,
@@ -108,10 +138,17 @@ class GraphMindAgent(BaseAgent):
         )
         text = completion.strip()
 
+        print(f"[DEBUG] RAW LLM OUTPUT:\n{completion}\n")
+
         lower_text = text.lower()
         start_idx = lower_text.find("<start>")
         if start_idx != -1:
-            cleaned = text[start_idx + len("<start>") :].strip()
+            content = text[start_idx + len("<start>") :]
+            end_idx = content.lower().find("<end>")
+            if end_idx != -1:
+                content = content[:end_idx]
+            
+            cleaned = content.strip()
         else:
             lines = [ln.strip() for ln in text.splitlines() if ln.strip()]
             cleaned = lines[0] if lines else ""
