@@ -46,6 +46,14 @@ def run_episode(
 
     for step in range(1, max_steps):
         valid_actions = env.get_valid_actions()
+        if verbose:
+            print(f"---------- STEP {step} ----------")
+            print(f"OBSERVATION:\n{observation.strip()}")
+            print("-" * 20)
+            print(f"info:\n{info}")
+            print("-" * 20)
+            print(f"VALID ACTIONS ({len(valid_actions)}): {valid_actions}")
+            print("-" * 20)
         agent.observe(observation)
         if manual:
             print("\n--- Manual step ---")
@@ -76,10 +84,16 @@ def run_episode(
         trajectory.append(record)
 
         if verbose:
-            print(f"Step {step}: action '{action}' {valid_actions}")
-            print((observation, info))
+            print("-" * 20)
+            print(f"CHOSEN ACTION: {action}")
+            print("="*50 + "\n")
 
         if done:
+            if verbose:
+                print(f"---------- FINAL STEP {step} ----------")
+                print(f"FINAL OBSERVATION:\n{observation.strip()}")
+                print(f"FINAL SCORE: {info.get('score', 0)}")
+                print("="*50)
             break
 
     return trajectory
@@ -206,6 +220,10 @@ def parse_args() -> argparse.Namespace:
 
 def main() -> None:
     args = parse_args()
+
+    print(f"\n{'='*40}")
+    print(f" NOW PLAYING: {args.game.stem.upper()}")
+    print(f"{'='*40}\n")
 
     logging.basicConfig(level=getattr(logging, args.log_level.upper(), logging.INFO))
 
