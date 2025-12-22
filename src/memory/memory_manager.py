@@ -268,7 +268,7 @@ class MemoryManager:
         )
 
     def update_memory(self, observation: str, last_action: str) -> None:
-        print("=" * 20)
+        # print("=" * 20)
         print("Updating memory")
         prev_hash = str(hash(self.memory))
         action_type = self._classify_action(last_action)
@@ -318,7 +318,7 @@ class MemoryManager:
 
         print("SNAPSHOT:")
         print(self.memory._snapshot())
-        print("=" * 20)
+        # print("=" * 20)
         print()
 
     def get_recent_entities_context(self) -> list[dict[str, Any]]:
